@@ -17,6 +17,9 @@ def get_url_base():
 def get_search_url(keyword, language):
     return get_url_base() +"/search?query="+ keyword +"&language=" + language
 
+def get_detail_url(url):
+    return get_url_base() + url
+
 def save_to_database(metadata):
     pass
 
@@ -49,8 +52,61 @@ def requestDispatcher(method,request_url,header=None):
 
 @app.route('/movie/get_meta')
 def get_meta():  # get name of a movie.
-    print(request.args.get("movie_id"))
-    return 'Hello World!'
+    # print(request.args.get("detail_address"))
+    # print(get_detail_url(request.args.get("detail_address")))
+    result = requestDispatcher("get", get_detail_url(request.args.get("detail_address")))
+
+    def handler(result):
+        return_result = {}
+        body = result.body.div.main
+        poster = body.find("img", {"class": "poster w-full"})
+        if poster is not None:
+            poster = poster["src"]
+        score = body.find("div", {"class": "user_score_chart"})
+        if score is not None:
+            score = score["data-percent"]
+        introduction = body.find("div", {"class": "overview"})
+        if introduction is not None:
+            introduction = introduction.p.text
+        tag = body.find("h3", {"class": "tagline"})
+        if tag is not None:
+            tag = tag.text
+        actress = body.find("ol", {"class": "people scroller"})
+
+        actressList = []
+
+        if actress is not None:
+            actresses = actress.find_all("li",{"class" : "card"})
+            for actress in actresses:
+                actorDetail = None
+                name = None
+                avatar = None
+                if actress.a is not None:
+                    actorDetail = actress.a["href"]
+                if actress.img is not None:
+                    avatar = actress.img["src"]
+                    name = actress.img["alt"]
+                character = actress.find("p", {"class": "character"})
+                if character is not None:
+                    character = character.text
+
+                actressList.append({"actorDetailPage": actorDetail,"character": character, "avatar": avatar, "name": name})
+
+        pictures = body.find_all("div", {"class": "backdrop glyphicons_v2 picture grey no_image_holder no_border no_border_radius"})
+        picturesList = []
+        for picture in pictures:
+            if picture.img is not None:
+                picturesList.append(picture.img["src"])
+
+        return_result["poster"] = poster
+        return_result["score"] = score
+        return_result["introduction"] = introduction
+        return_result["tag"] = tag
+        return_result["actressList"] = actressList
+        return_result["pictureList"] = picturesList
+
+        return json.dumps(return_result, ensure_ascii=False)
+    return resolveMeta(result.text, handler)
 
 
 @app.route("/movie/search")
@@ -74,10 +130,10 @@ def searchMovies():
 
 
             img_address = attributes[0].find("img")
-            detail_address = attributes[1].find("a", {"class":"result"})
+            detail_address = attributes[1].find("a", {"class": "result"})
             translated_name = attributes[1].div.div.a.h2.next_element
-            original_name = attributes[1].find("span", {"class":"title"})
-            release_date = attributes[1].find("span",{ "class":"release_date"})
+            original_name = attributes[1].find("span", {"class": "title"})
+            release_date = attributes[1].find("span", {"class": "release_date"})
             introduction = attributes[1].find("p")
             if release_date is not None:
                 release_date = release_date.text
