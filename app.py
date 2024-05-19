@@ -14,7 +14,7 @@ cors = CORS(app, resources={r"*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
 
 
-# cluster.connect()
+instance = cluster.connect()
 
 def get_url_base():
     return "https://www.themoviedb.org"
@@ -152,6 +152,8 @@ def get_meta():  # get name of a movie.
         return_result["pictureList"] = picturesList
         return_result["makerList"] = makersList
         return_result["genre_list"] = genresList
+        instance.execute("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)"
+                         " values(?,?,?,?,?,?,?,?,?,?,?,?)",request.args.get("detail_address") , poster, score, introduction, movie_name, tag, actressList, release_year, level, picturesList, makersList, genresList)
 
         return json.dumps(return_result, ensure_ascii=False)
 
