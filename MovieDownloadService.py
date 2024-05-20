@@ -8,8 +8,12 @@ from flask_cors import CORS, cross_origin
 from cassandra.auth import PlainTextAuthProvider
 
 app = Flask(__name__)
-cors = CORS(app, resources={r"*": {"origins": "*"}})
-app.config['CORS_HEADERS'] = 'Content-Type'
+# CORS(app,  resources={
+#    r"/*": {
+#        "origins": ["http://example.com", "http://www.example.com"],
+#        "methods": ["GET", "POST"],
+#        "headers": ["Content-Type", "Authorization"]
+#    }})
 aria = aria2p.API(
     aria2p.Client(
         host="http://localhost",
@@ -25,6 +29,7 @@ instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
 prepared = instance.prepare(query="insert into movie.resource (movieId, resource, status) values (?,?,?)")
 prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
+prepared_delete = instance.prepare("delete from movie.resource where movieId = ? and resource = ?")
 
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
@@ -32,7 +37,8 @@ prepared_query = instance.prepare("select * from movie.resource where movieId = 
 @app.route('/movie/get_source', methods=['POST'])
 @cross_origin()
 def get_source():
-    movieId = request.get_json()["movieId"]
+    print(request.data)
+    movieId = request.form["movieId"]
     print(movieId)
 
     if movieId is None:
@@ -40,15 +46,16 @@ def get_source():
     result = instance.execute(prepared_query, [movieId])
     result_list = []
     for (movieid, resource, status) in result:
-        result_list.append({"movieId": movieid, "resouce": resource, "status": status})
+        result_list.append({"movieId": movieid, "source": resource, "status": status})
     return json.dumps(result_list, ensure_ascii=False)
 
 
 @app.route('/movie/add_source', methods=['POST'])
 @cross_origin()
 def add_source():
-    movieId = request.get_json()["movieId"]
-    source = request.get_json()["source"]
+    print(request.method)
+    movieId = request.form["movieId"]
+    source = request.form["source"]
     print(movieId)
     print(source)
     if movieId is None or source is None:
@@ -56,6 +63,19 @@ def add_source():
     instance.execute(prepared.bind((movieId, source, "init")))
 
     aria.get_downloads(None)
+    return "success"
+
+
+@app.route('/movie/remove_source', methods=['POST'])
+@cross_origin()
+def remove_source():
+    movieId = request.form["movieId"]
+    source = request.form["source"]
+    print(movieId)
+    print(source)
+    if movieId is None or source is None:
+        return "error"
+    instance.execute(prepared_delete.bind((movieId, source)))
     return "success"
 
 
@@ -71,6 +91,7 @@ def download():
     else:
         download = aria.add_uris([source])
         return download.gid
+
 
 @app.route('/movie/pause', methods=['POST'])
 @cross_origin()
@@ -113,7 +134,8 @@ def get_download_status():
     result_list = []
     for download in downloads:
         download.update()
-        result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid, "total_size": download.total_length, "complete_size": download.completed_length})
+        result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid,
+                            "total_size": download.total_length, "complete_size": download.completed_length})
         print(download.name, download.download_speed, download.gid)
     return json.dumps(result_list, ensure_ascii=False)
 

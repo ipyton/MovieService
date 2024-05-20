@@ -12,12 +12,15 @@ from bs4 import BeautifulSoup
 from flask_cors import CORS, cross_origin
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 
-cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider)
+cluster = Cluster(['192.168.23.129'], auth_provider=auth_provider)
 
 app = Flask(__name__)
-cors = CORS(app, resources={r"*": {"origins": "*"}})
+cors = CORS(app, resources={r"*": {"origins": "*","methods": "*", "headers":"*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
+
 instance = cluster.connect()
+insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
+
 
 
 def get_url_base():
@@ -90,8 +93,7 @@ def get_meta():  # get name of a movie.
         if level is not None:
             level = level.text
 
-        movie_name = body.find("h2", {"class": "2"})
-        print(movie_name)
+        movie_name = body.find("section", {"class": "images inner"}).section
         release_year = body.find("span",{"class":"tag release_date"})
 
         if release_year is not None:
@@ -120,8 +122,8 @@ def get_meta():  # get name of a movie.
                     character = character.text
 
                 actressList.append(
-                    {"actorDetailPage": actorDetail, "character": character, "avatar": avatar, "name": name})
-
+                    json.dumps({"actorDetailPage": actorDetail, "character": character, "avatar": avatar, "name": name}, ensure_ascii=False))
+        print(actressList)
         pictures = body.find_all("div", {
             "class": "backdrop glyphicons_v2 picture grey no_image_holder no_border no_border_radius"})
         picturesList = []
@@ -130,13 +132,12 @@ def get_meta():  # get name of a movie.
                 picturesList.append(picture.img["src"])
 
         makers = body.find_all("li", {"class": "profile"})
-        makersList = []
+        makersDict={}
         if makers is not None:
             for maker in makers:
                 info = maker.find_all("p")
                 if len(info) == 2:
-                    makersList.append({"name": info[0].a.text, "role":info[1].text})
-
+                    makersDict[info[0].a.text] = info[1].text
         genresList = []
         genre = body.find("span", {"class" : "genres"})
         if genre is not None:
@@ -154,10 +155,12 @@ def get_meta():  # get name of a movie.
         return_result["level"] = level
         return_result["actressList"] = actressList
         return_result["pictureList"] = picturesList
-        return_result["makerList"] = makersList
+        return_result["makerList"] = makersDict
         return_result["genre_list"] = genresList
-        instance.execute("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)"
-                         " values(?,?,?,?,?,?,?,?,?,?,?,?)",request.args.get("detail_address") , poster, score, introduction, movie_name, tag, actressList, release_year, level, picturesList, makersList, genresList)
+
+# insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
+        print(type(makersDict))
+        instance.execute(insert_meta, (request.args.get("detail_address") , poster, score, introduction, movie_name, tag, actressList, release_year, level, picturesList, makersDict, genresList))
 
         return json.dumps(return_result, ensure_ascii=False)
 
