@@ -2,88 +2,121 @@ import json
 
 from flask import Flask
 from flask import request
-from cassandra.cluster import Cluster
+from cassandra.cluster import Cluster, ExecutionProfile, EXEC_PROFILE_DEFAULT, ConsistencyLevel
 import aria2p
 from flask_cors import CORS, cross_origin
-
-cluster = Cluster(['192.168.0.1', '192.168.0.2'])
+from cassandra.auth import PlainTextAuthProvider
 
 app = Flask(__name__)
 cors = CORS(app, resources={r"*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
-aria2 = aria2p.API(
+aria = aria2p.API(
     aria2p.Client(
         host="http://localhost",
         port=6800,
         secret=""
     )
 )
+# profile = ExecutionProfile(consistency_level=ConsistencyLevel.LOCAL_ONE)
 
-instance = cluster.connect()
+auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
+cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
+instance = cluster.connect("movie")
+instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
+prepared = instance.prepare(query="insert into movie.resource (movieId, resource, status) values (?,?,?)")
+prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
+
+
+# add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
+
+@app.route('/movie/get_source', methods=['POST'])
+@cross_origin()
+def get_source():
+    movieId = request.get_json()["movieId"]
+    print(movieId)
+
+    if movieId is None:
+        return "error"
+    result = instance.execute(prepared_query, [movieId])
+    result_list = []
+    for (movieid, resource, status) in result:
+        result_list.append({"movieId": movieid, "resouce": resource, "status": status})
+    return json.dumps(result_list, ensure_ascii=False)
+
 
 @app.route('/movie/add_source', methods=['POST'])
 @cross_origin()
 def add_source():
-    movieId = request.args.get("movieId")
-    source = request.args.get("source")
-    instance.execute("insert into movie.resource (movieId, resource, status) values (?,?,?)", movieId, source, "init")
-    aria2.get_downloads()
-    return "success"
+    movieId = request.get_json()["movieId"]
+    source = request.get_json()["source"]
+    print(movieId)
+    print(source)
+    if movieId is None or source is None:
+        return "error"
+    instance.execute(prepared.bind((movieId, source, "init")))
 
+    aria.get_downloads(None)
+    return "success"
 
 
 @app.route('/movie/start', methods=['POST'])
 @cross_origin()
 def download():
-    movieId = request.args.get("movieId")
-    source =request.args.get("source")
-    instance.execute("insert into movie.resource (movieId, resource, status) values (?,?,?)", movieId, source,
-                     "downloading")
+    movieId = request.get_json()["movieId"]
+    source = request.get_json()["source"]
+    instance.execute(prepared, [movieId, source, "downloading"])
     if source.split(":") == "magnet":
-        aria2.add_magnet(source)
+        download = aria.add_magnet(source)
+        return download.gid
     else:
-        aria2.add_uris([source])
+        download = aria.add_uris([source])
+        return download.gid
 
 @app.route('/movie/pause', methods=['POST'])
 @cross_origin()
 def pause():
-    movieId = request.args.get("movieId")
-    gid = request.args.get("gid")
-    source =request.args.get("source")
-    instance.execute("insert into movie.resource (movieId, resource, status) values (?,?,?)", movieId, source,
-                     "canceled")
-    download = aria2.get_download(gid)
-    aria2.pause(download)
+    movieId = request.get_json()["movieId"]
+    source = request.get_json()["source"]
+    gid = request.get_json().get("gid")
+
+    instance.execute(prepared, [movieId, source, "paused"])
+    download = aria.get_download(gid)
+    aria.pause(download)
+
 
 @app.route('/movie/resume', methods=['POST'])
 @cross_origin()
 def resume():
     movieId = request.args.get("movieId")
     gid = request.args.get("gid")
-    source =request.args.get("source")
-    instance.execute("insert into movie.resource (movieId, resource, status) values (?,?,?)", movieId, source,
-                     "downloading")
-    download = aria2.get_download(gid)
-    aria2.resume(download)
+    source = request.args.get("source")
+    instance.execute(prepared, [movieId, source, "downloading"])
+    download = aria.get_download(gid)
+    aria.resume(download)
 
-def resume():
+
+@app.route('/movie/remove', methods=['POST'])
+@cross_origin()
+def remove():
     movieId = request.args.get("movieId")
     gid = request.args.get("gid")
     source = request.args.get("source")
-    instance.execute("insert into movie.resource (movieId, resource, status) values (?,?,?)", movieId, source,
-                     "canceled")
-    download = aria2.get_download(gid)
-    aria2.remove(download)
+    instance.execute(prepared, [movieId, source, "canceled"])
+    download = aria.get_download(gid)
+    aria.remove([download])
 
 
 @app.route('/movie/get_download_status', methods=['GET'])
 @cross_origin()
 def get_download_status():
-    downloads = aria2.get_downloads()
+    downloads = aria.get_downloads()
+    result_list = []
     for download in downloads:
-        print(download.name, download.download_speed)
-    return "download status"
+        download.update()
+        result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid, "total_size": download.total_length, "complete_size": download.completed_length})
+        print(download.name, download.download_speed, download.gid)
+    return json.dumps(result_list, ensure_ascii=False)
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host="0.0.0.0")

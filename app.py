@@ -3,18 +3,22 @@ import json
 from flask import Flask
 from flask import request
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
+
+
+
 import requests
 from bs4 import BeautifulSoup
 from flask_cors import CORS, cross_origin
+auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 
-cluster = Cluster(['192.168.0.1', '192.168.0.2'])
+cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider)
 
 app = Flask(__name__)
 cors = CORS(app, resources={r"*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
-
-
 instance = cluster.connect()
+
 
 def get_url_base():
     return "https://www.themoviedb.org"
