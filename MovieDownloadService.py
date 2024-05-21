@@ -14,6 +14,7 @@ app = Flask(__name__)
 #        "methods": ["GET", "POST"],
 #        "headers": ["Content-Type", "Authorization"]
 #    }})
+CORS(app)
 aria = aria2p.API(
     aria2p.Client(
         host="http://localhost",
@@ -27,8 +28,9 @@ auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra"
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
-prepared = instance.prepare(query="insert into movie.resource (movieId, resource, status) values (?,?,?)")
+prepared = instance.prepare(query="insert into movie.resource (movieId, resource, gid) values (?,?,?)")
 prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
+prepared_query_for_download = instance.prepare("select * from movie.resource where movieId=? and resource=?")
 prepared_delete = instance.prepare("delete from movie.resource where movieId = ? and resource = ?")
 
 
@@ -37,16 +39,26 @@ prepared_delete = instance.prepare("delete from movie.resource where movieId = ?
 @app.route('/movie/get_source', methods=['POST'])
 @cross_origin()
 def get_source():
-    print(request.data)
     movieId = request.form["movieId"]
-    print(movieId)
 
     if movieId is None:
         return "error"
     result = instance.execute(prepared_query, [movieId])
     result_list = []
-    for (movieid, resource, status) in result:
-        result_list.append({"movieId": movieid, "source": resource, "status": status})
+
+    gids = []
+    for (movieid, resource, gid) in result:
+        if gid is None or len(gid) == 0:
+            result_list.append({"movieId": movieid, "source": resource, "gid": gid})
+            continue
+
+        try:
+            download = aria.get_download(gid)
+        except:
+            result_list.append({"movieId": movieid, "source": resource, "gid": ""})
+            continue;
+        result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": download.status})
+
     return json.dumps(result_list, ensure_ascii=False)
 
 
@@ -60,9 +72,10 @@ def add_source():
     print(source)
     if movieId is None or source is None:
         return "error"
-    instance.execute(prepared.bind((movieId, source, "init")))
+    print(movieId)
+    print(source)
+    instance.execute(prepared.bind((movieId, source, "")))
 
-    aria.get_downloads(None)
     return "success"
 
 
@@ -82,47 +95,105 @@ def remove_source():
 @app.route('/movie/start', methods=['POST'])
 @cross_origin()
 def download():
-    movieId = request.get_json()["movieId"]
-    source = request.get_json()["source"]
-    instance.execute(prepared, [movieId, source, "downloading"])
+    movieId = request.form["movieId"]
+    source = request.form["source"]
+    print([movieId, source])
+    rows = instance.execute(prepared_query_for_download, [movieId, source])
+    if rows.one()[2] is not None:
+        return "exist!"
     if source.split(":") == "magnet":
         download = aria.add_magnet(source)
+        instance.execute(prepared, [movieId, source, download.gid])
         return download.gid
     else:
         download = aria.add_uris([source])
+        instance.execute(prepared, [movieId, source, download.gid])
         return download.gid
 
 
 @app.route('/movie/pause', methods=['POST'])
 @cross_origin()
 def pause():
-    movieId = request.get_json()["movieId"]
-    source = request.get_json()["source"]
-    gid = request.get_json().get("gid")
-
-    instance.execute(prepared, [movieId, source, "paused"])
+    gid = request.form["gid"]
+    # instance.execute(prepared, [movieId, source, "paused"])
     download = aria.get_download(gid)
     aria.pause(download)
+
+
+@app.route("/movie/batch_pause", methods=['POST'])
+@cross_origin()
+def batch_pause():
+    movies = request.get_json()["downloads"]
+    print("---------")
+    gids = []
+    for movie in movies:
+        print(movie)
+        # instance.execute(prepared, (movie["movieId"], movie["source"], "paused"))
+        gids.append(movie["gid"])
+
+    downloads = aria.get_downloads(gids)
+    aria.pause(downloads)
+    return "success"
+
+
+@app.route('/movie/batch_resume', methods=['POST'])
+@cross_origin()
+def batch_resume():
+    movies = request.get_json()["downloads"]
+    gids = []
+    for movie in movies:
+        print(movie)
+        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
+        gids.append(movie["gid"])
+    downloads = aria.get_downloads(gids)
+    aria.resume(downloads)
+    return "success"
 
 
 @app.route('/movie/resume', methods=['POST'])
 @cross_origin()
 def resume():
-    movieId = request.args.get("movieId")
-    gid = request.args.get("gid")
-    source = request.args.get("source")
-    instance.execute(prepared, [movieId, source, "downloading"])
-    download = aria.get_download(gid)
+    gid = request.form["gid"]
+    download = aria.get_downloads(gid)
     aria.resume(download)
+    return "success"
+
+
+@app.route('/movie/batch_stop', methods=['POST'])
+@cross_origin()
+def batch_stop():
+    movies = request.get_json()["downloads"]
+    gids = []
+    for movie in movies:
+        print(movie)
+        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
+        gids.append(movie["gid"])
+    downloads = aria.get_downloads(gids)
+    aria.resume(downloads)
+
+
+@app.route('/movie/batch_remove', methods=['POST'])
+@cross_origin()
+def batch_remove():
+    movies = request.get_json()["downloads"]
+    print(movies)
+    gids = []
+    for movie in movies:
+        print(movie)
+        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
+        gids.append(movie["gid"])
+    downloads = aria.get_downloads(gids)
+    aria.remove(downloads)
+    return "success"
 
 
 @app.route('/movie/remove', methods=['POST'])
 @cross_origin()
 def remove():
-    movieId = request.args.get("movieId")
-    gid = request.args.get("gid")
-    source = request.args.get("source")
-    instance.execute(prepared, [movieId, source, "canceled"])
+    movieId = request.form["movieId"]
+    gid = request.form["gid"]
+    source = request.form["source"]
+    # instance.execute(prepared, [movieId, source, "canceled"])
     download = aria.get_download(gid)
     aria.remove([download])
 
@@ -135,7 +206,8 @@ def get_download_status():
     for download in downloads:
         download.update()
         result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid,
-                            "total_size": download.total_length, "complete_size": download.completed_length})
+                            "total_size": download.total_length, "complete_size": download.completed_length,
+                            "status": download.status})
         print(download.name, download.download_speed, download.gid)
     return json.dumps(result_list, ensure_ascii=False)
 
