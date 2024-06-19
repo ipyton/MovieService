@@ -1,15 +1,21 @@
+# -*- coding: utf-8 -*-
 import json
-
+from cassandra.query import dict_factory
 from flask import Flask
 from flask import request
 from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
-
-
-
 import requests
 from bs4 import BeautifulSoup
 from flask_cors import CORS, cross_origin
+import sys
+import sys
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+import MovieParser
+
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 
 cluster = Cluster(['192.168.23.129'], auth_provider=auth_provider)
@@ -20,9 +26,10 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 
 instance = cluster.connect()
 insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
-
-
-
+get_video_meta = instance.prepare("select * from movie.meta where movieId=?")
+getStared = instance.prepare("select movieId from movie.gallery where userId = ? and movieId=?")
+# instance.row_factory = dict_factory
+# 完成认证功能
 def get_url_base():
     return "https://www.themoviedb.org"
 
@@ -71,6 +78,16 @@ def requestDispatcher(method, request_url, header=None):
 def get_meta():  # get name of a movie.
     # print(request.args.get("detail_address"))
     # print(get_detail_url(request.args.get("detail_address")))
+    print(type(request.args.get("detail_address")))
+    result = instance.execute(get_video_meta.bind((request.args.get("detail_address"),)) )
+    result_list = list(result)
+
+    if len(result_list) != 0:
+        parsed = MovieParser.parseMovie(result_list[0])
+        result = list(instance.execute(getStared.bind((request.args.get("userId"),request.args.get("detail_address")))))
+        if len(result) != 0:
+            parsed["stareds"] = True
+        return json.dumps(parsed, ensure_ascii=False)
     result = requestDispatcher("get", get_detail_url(request.args.get("detail_address")))
 
     def handler(result):
@@ -123,7 +140,7 @@ def get_meta():  # get name of a movie.
 
                 actressList.append(
                     json.dumps({"actorDetailPage": actorDetail, "character": character, "avatar": avatar, "name": name}, ensure_ascii=False))
-        print(actressList)
+        #print(actressList)
         pictures = body.find_all("div", {
             "class": "backdrop glyphicons_v2 picture grey no_image_holder no_border no_border_radius"})
         picturesList = []
@@ -159,7 +176,6 @@ def get_meta():  # get name of a movie.
         return_result["genre_list"] = genresList
 
 # insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
-        print(type(makersDict))
         instance.execute(insert_meta, (request.args.get("detail_address") , poster, score, introduction, movie_name, tag, actressList, release_year, level, picturesList, makersDict, genresList))
 
         return json.dumps(return_result, ensure_ascii=False)
@@ -172,7 +188,6 @@ def get_meta():  # get name of a movie.
 def searchMovies():
     keyword = request.args.get("keyword")
     page_number = request.args.get("page_number")
-    print(get_search_url(keyword, "zh-CN"))
     result = requestDispatcher("get", get_search_url(keyword, "zh-CN"))
 
     def handler(result):
