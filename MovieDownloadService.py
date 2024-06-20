@@ -7,7 +7,22 @@ from cassandra.cluster import Cluster, ExecutionProfile, EXEC_PROFILE_DEFAULT, C
 import aria2p
 from flask_cors import CORS, cross_origin
 from cassandra.auth import PlainTextAuthProvider
+import sched
+import time
+import concurrent.futures
+import ffmpeg
+from minio import Minio
+from minio.error import S3Error
 
+import os
+minio_client = Minio(
+    "play.min.io",  # MinIO server地址
+    access_key="YOUR-ACCESSKEYID",  # 替换为你的 access key
+    secret_key="YOUR-SECRETACCESSKEY",  # 替换为你的 secret key
+    secure=True  # 如果使用的是HTTP则设置为False
+)
+bucket_name = "my-bucket"  # 替换为你的桶名称
+directory_path = "path/to/your/folder"  # 替换为你的文件夹路径
 app = Flask(__name__)
 # CORS(app,  resources={
 #    r"/*": {
@@ -23,16 +38,20 @@ aria = aria2p.API(
         secret=""
     )
 )
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+upload_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+futures = []
 # profile = ExecutionProfile(consistency_level=ConsistencyLevel.LOCAL_ONE)
 
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
-prepared = instance.prepare(query="insert into movie.resource (movieId, resource, gid) values (?,?,?)")
+prepared = instance.prepare(query="insert into movie.resource (movieId, resource, name, gid, status) values (?,?,?,?,?)")
 prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
 prepared_query_for_download = instance.prepare("select * from movie.resource where movieId=? and resource=?")
 prepared_delete = instance.prepare("delete from movie.resource where movieId = ? and resource = ?")
+prepared_set_status = instance.prepare("alter table set status = ? where movieId = ? ")
 
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
@@ -52,12 +71,11 @@ def get_source():
         if gid is None or len(gid) == 0:
             result_list.append({"movieId": movieid, "source": resource, "gid": gid})
             continue
-
         try:
             download = aria.get_download(gid)
         except:
             result_list.append({"movieId": movieid, "source": resource, "gid": ""})
-            continue;
+            continue
         result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": download.status})
 
     return json.dumps(result_list, ensure_ascii=False)
@@ -69,13 +87,14 @@ def add_source():
     print(request.method)
     movieId = request.form["movieId"]
     source = request.form["source"]
+    name = request.form["name"]
     print(movieId)
     print(source)
     if movieId is None or source is None:
         return "error"
     print(movieId)
     print(source)
-    instance.execute(prepared.bind((movieId, source, "")))
+    instance.execute(prepared.bind((movieId, source, name,"" , "init")))
 
     return "success"
 
@@ -98,13 +117,14 @@ def remove_source():
 def download():
     movieId = request.form["movieId"]
     source = request.form["source"]
+    name = request.form["name"]
     print([movieId, source])
     rows = instance.execute(prepared_query_for_download, [movieId, source])
     if rows.one()[2] is not None:
         return "exist!"
     if source.split(":") == "magnet":
-        download = aria.add_magnet(source)
-        instance.execute(prepared, [movieId, source, download.gid])
+        download = aria.add_magnet(source,options={"dir":"~/cache", "out":movieId+":"+name})
+        instance.execute(prepared, [movieId, source,name, download.gid,"downloading"])
         return download.gid
     else:
         download = aria.add_uris([source])
@@ -125,7 +145,6 @@ def pause():
 @cross_origin()
 def batch_pause():
     movies = request.get_json()["downloads"]
-    print("---------")
     gids = []
     for movie in movies:
         print(movie)
@@ -206,11 +225,59 @@ def get_download_status():
     result_list = []
     for download in downloads:
         download.update()
-        result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid,
+        result_list.append({"name": download.name.split(":")[1], "speed": download.download_speed, "gid": download.gid,
                             "total_size": download.total_length, "complete_size": download.completed_length,
                             "status": download.status})
         print(download.name, download.download_speed, download.gid)
     return json.dumps(result_list, ensure_ascii=False)
+
+def upload(result):
+    (download, output_path, input_path) = result
+    for root, dirs, files in os.walk(output_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            object_name = os.path.relpath(file_path, directory_path)
+            try:
+                minio_client.fput_object(
+                    bucket_name, object_name, file_path
+                )
+                print(f"File {file} uploaded successfully.")
+            except S3Error as e:
+                print(f"Failed to upload {file}. Error: {e}")
+    movieId = download.name.split(":")[0]
+    instance.execute(prepared_set_status, ["finished", movieId])
+
+
+def encode(download):
+    if download is None:
+        return None
+    name_segment = download.name.split(":")
+    output_path = "~/processed/" + download.name + "/" + "index.m3u8"
+    input_path = "~/processed/" + download.name + "/" + "segment_%03d.ts"
+    ffmpeg.input(download.directory).output(output_path,
+                                            format="hls",
+                                            hls_time=10,
+                                            hls_list_size=0,
+                                            hls_segment_filename=input_path
+                                            ).run()
+    return (download, output_path,input_path)
+
+def check():
+    downloads = aria.get_downloads()
+    for download in downloads:
+        download.update()
+        futures.append(executor.submit(encode, (download)))
+
+    for future in futures:
+        if future.done():
+            upload_executor.submit(upload,future.result())
+
+
+    scheduler.enter(3, 1, check, ())
+
+scheduler = sched.scheduler(time.time, time.sleep)
+scheduler.enter(5, 1, check)
+scheduler.run()
 
 
 if __name__ == '__main__':

@@ -27,7 +27,7 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 instance = cluster.connect()
 insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
 get_video_meta = instance.prepare("select * from movie.meta where movieId=?")
-getStared = instance.prepare("select movieId from movie.gallery where userId = ? and movieId=?")
+getStared = instance.prepare("select movieId from movie.movieGallery where userId = ? and movieId=?")
 # instance.row_factory = dict_factory
 # 完成认证功能
 def get_url_base():
@@ -78,6 +78,8 @@ def requestDispatcher(method, request_url, header=None):
 def get_meta():  # get name of a movie.
     # print(request.args.get("detail_address"))
     # print(get_detail_url(request.args.get("detail_address")))
+    if request.args.get("detail_address") is None:
+        return "error"
     print(type(request.args.get("detail_address")))
     result = instance.execute(get_video_meta.bind((request.args.get("detail_address"),)) )
     result_list = list(result)
@@ -86,8 +88,10 @@ def get_meta():  # get name of a movie.
         parsed = MovieParser.parseMovie(result_list[0])
         result = list(instance.execute(getStared.bind((request.args.get("userId"),request.args.get("detail_address")))))
         if len(result) != 0:
-            parsed["stareds"] = True
+            print("has result")
+            parsed["stared"] = True
         return json.dumps(parsed, ensure_ascii=False)
+
     result = requestDispatcher("get", get_detail_url(request.args.get("detail_address")))
 
     def handler(result):
