@@ -1,3 +1,4 @@
+#encoding=utf-8
 import json
 import sys
 import codecs
@@ -13,12 +14,12 @@ import concurrent.futures
 import ffmpeg
 from minio import Minio
 from minio.error import S3Error
-
+import threading
 import os
 minio_client = Minio(
-    "play.min.io",  # MinIO server地址
-    access_key="YOUR-ACCESSKEYID",  # 替换为你的 access key
-    secret_key="YOUR-SECRETACCESSKEY",  # 替换为你的 secret key
+    "localhost",  # MinIO server地址
+    access_key="admin",  # 替换为你的 access key
+    secret_key="admin123",  # 替换为你的 secret key
     secure=True  # 如果使用的是HTTP则设置为False
 )
 bucket_name = "my-bucket"  # 替换为你的桶名称
@@ -35,7 +36,7 @@ aria = aria2p.API(
     aria2p.Client(
         host="http://localhost",
         port=6800,
-        secret=""
+        secret="your_secret_token"
     )
 )
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
@@ -51,8 +52,8 @@ prepared = instance.prepare(query="insert into movie.resource (movieId, resource
 prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
 prepared_query_for_download = instance.prepare("select * from movie.resource where movieId=? and resource=?")
 prepared_delete = instance.prepare("delete from movie.resource where movieId = ? and resource = ?")
-prepared_set_status = instance.prepare("alter table set status = ? where movieId = ? ")
-
+prepared_set_status = instance.prepare("update movie.resource set status = ? where movieId = ? and resource=?")
+update_gid = instance.prepare("update movie.resource set gid = ? where movieId = ? and resource = ?")
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
@@ -60,23 +61,22 @@ prepared_set_status = instance.prepare("alter table set status = ? where movieId
 @cross_origin()
 def get_source():
     movieId = request.form["movieId"]
-
     if movieId is None:
         return "error"
     result = instance.execute(prepared_query, [movieId])
     result_list = []
 
     gids = []
-    for (movieid, resource, gid) in result:
+    for (movieid, resource,name, gid,status) in result:
         if gid is None or len(gid) == 0:
-            result_list.append({"movieId": movieid, "source": resource, "gid": gid})
+            result_list.append({"movieId": movieid, "source": resource,  "name":name})
             continue
         try:
             download = aria.get_download(gid)
         except:
             result_list.append({"movieId": movieid, "source": resource, "gid": ""})
             continue
-        result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": download.status})
+        result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": status})
 
     return json.dumps(result_list, ensure_ascii=False)
 
@@ -111,6 +111,38 @@ def remove_source():
     instance.execute(prepared_delete.bind((movieId, source)))
     return "success"
 
+@app.route('/movie/get_files', methods=['POST'])
+@cross_origin()
+def get_files():
+    gid = request.form["gid"]
+    movieId = request.form["movieId"]
+    resource = request.form["resource"]
+    status = aria.get_download(gid)
+    if status is None:
+        return "404"
+    elif status.followed_by_ids:
+        gid = status.followed_by_ids[0]
+        instance.execute(update_gid.bind((gid,movieId, resource)))
+    else:
+        return "getting meta"
+
+    files = aria.get_files(gid)
+    return files
+
+
+@app.route('/movie/select', methods=['POST'])
+@cross_origin()
+def select_download():
+    gid = request.form["gid"]
+    select = request.form["place"]
+    resource = request.form["resource"]
+    movieId = request.form["movieId"]
+    file_to_rename = aria.get_files(gid)[int(select) - 1]
+    aria.client.change_options(gid, {"select-file": select,"index": file_to_rename.index,
+    "path": movieId+ ":" + resource})
+    aria.client.unpause(gid)
+    instance.execute(prepared_query.bind(("downloading",movieId, resource)))
+    return "success"
 
 @app.route('/movie/start', methods=['POST'])
 @cross_origin()
@@ -120,11 +152,12 @@ def download():
     name = request.form["name"]
     print([movieId, source])
     rows = instance.execute(prepared_query_for_download, [movieId, source])
-    if rows.one()[2] is not None:
-        return "exist!"
-    if source.split(":") == "magnet":
-        download = aria.add_magnet(source,options={"dir":"~/cache", "out":movieId+":"+name})
-        instance.execute(prepared, [movieId, source,name, download.gid,"downloading"])
+    if rows.status != "finished":
+        return "success"
+    source= source.strip()
+    if source.split(":")[0] == "magnet":
+        download = aria.add_magnet(source,options={"pause": "true"})
+        instance.execute(prepared, [movieId, source,name, download.gid,"downloading_meta"])
         return download.gid
     else:
         download = aria.add_uris([source])
@@ -225,7 +258,7 @@ def get_download_status():
     result_list = []
     for download in downloads:
         download.update()
-        result_list.append({"name": download.name.split(":")[1], "speed": download.download_speed, "gid": download.gid,
+        result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid,
                             "total_size": download.total_length, "complete_size": download.completed_length,
                             "status": download.status})
         print(download.name, download.download_speed, download.gid)
@@ -241,7 +274,7 @@ def upload(result):
                 minio_client.fput_object(
                     bucket_name, object_name, file_path
                 )
-                print(f"File {file} uploaded successfully.")
+                print(f"File {file} uploaded successfully")
             except S3Error as e:
                 print(f"Failed to upload {file}. Error: {e}")
     movieId = download.name.split(":")[0]
@@ -252,8 +285,8 @@ def encode(download):
     if download is None:
         return None
     name_segment = download.name.split(":")
-    output_path = "~/processed/" + download.name + "/" + "index.m3u8"
-    input_path = "~/processed/" + download.name + "/" + "segment_%03d.ts"
+    output_path = "processed/" + download.name + "/" + "index.m3u8"
+    input_path = "processed/" + download.name + "/" + "segment_%03d.ts"
     ffmpeg.input(download.directory).output(output_path,
                                             format="hls",
                                             hls_time=10,
@@ -261,6 +294,8 @@ def encode(download):
                                             hls_segment_filename=input_path
                                             ).run()
     return (download, output_path,input_path)
+
+scheduler = sched.scheduler(time.time, time.sleep)
 
 def check():
     downloads = aria.get_downloads()
@@ -272,13 +307,17 @@ def check():
         if future.done():
             upload_executor.submit(upload,future.result())
 
-
+    print("scan")
     scheduler.enter(3, 1, check, ())
 
-scheduler = sched.scheduler(time.time, time.sleep)
-scheduler.enter(5, 1, check)
-scheduler.run()
+
+def start_scheduler():
+    scheduler.enter(5, 1, check)
+    scheduler.run()
+
 
 
 if __name__ == '__main__':
+    # thread = threading.Thread(target=start_scheduler)
+    # thread.start()
     app.run(host="0.0.0.0",port=5001)
