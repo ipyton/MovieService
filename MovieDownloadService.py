@@ -20,7 +20,7 @@ minio_client = Minio(
     "localhost",  # MinIO server地址
     access_key="admin",  # 替换为你的 access key
     secret_key="admin123",  # 替换为你的 secret key
-    secure=True  # 如果使用的是HTTP则设置为False
+    secure=False  # 如果使用的是HTTP则设置为False
 )
 bucket_name = "my-bucket"  # 替换为你的桶名称
 directory_path = "path/to/your/folder"  # 替换为你的文件夹路径
@@ -124,9 +124,14 @@ def get_files():
         gid = status.followed_by_ids[0]
         instance.execute(update_gid.bind((gid,movieId, resource)))
     else:
-        return "getting meta"
+        print(status.status)
+        result = {"status" :"getting", "total_size": status.total_length, "complete_size": status.completed_length}
+        return json.dumps(result, ensure_ascii=False)
 
-    files = aria.get_files(gid)
+    files = aria.get_download(gid).files
+    files = list(files)
+    files = [{"file":file.index,"path":file.path.name,"size":file.length} for file in files]
+    print(files,flush=True)
     return files
 
 
@@ -139,7 +144,7 @@ def select_download():
     movieId = request.form["movieId"]
     file_to_rename = aria.get_files(gid)[int(select) - 1]
     aria.client.change_options(gid, {"select-file": select,"index": file_to_rename.index,
-    "path": movieId+ ":" + resource})
+    "path": "cache/" + movieId,"out":gid})
     aria.client.unpause(gid)
     instance.execute(prepared_query.bind(("downloading",movieId, resource)))
     return "success"
@@ -152,11 +157,12 @@ def download():
     name = request.form["name"]
     print([movieId, source])
     rows = instance.execute(prepared_query_for_download, [movieId, source])
-    if rows.status != "finished":
+    rows = list(rows)
+    if len(rows) !=0 and rows[0].status == "finished":
         return "success"
     source= source.strip()
     if source.split(":")[0] == "magnet":
-        download = aria.add_magnet(source,options={"pause": "true"})
+        download = aria.add_magnet(source,options={"path":"cache/" + movieId, "pause-metadata": "true"})
         instance.execute(prepared, [movieId, source,name, download.gid,"downloading_meta"])
         return download.gid
     else:
@@ -265,7 +271,7 @@ def get_download_status():
     return json.dumps(result_list, ensure_ascii=False)
 
 def upload(result):
-    (download, output_path, input_path) = result
+    (download, output_path) = result
     for root, dirs, files in os.walk(output_path):
         for file in files:
             file_path = os.path.join(root, file)
@@ -285,15 +291,17 @@ def encode(download):
     if download is None:
         return None
     name_segment = download.name.split(":")
-    output_path = "processed/" + download.name + "/" + "index.m3u8"
-    input_path = "processed/" + download.name + "/" + "segment_%03d.ts"
-    ffmpeg.input(download.directory).output(output_path,
+    output_path = "processed/" + str(download.path).split("/")[-2]
+
+    ffmpeg.input(download.path).output(output_path+ "/" + "index.m3u8",
                                             format="hls",
                                             hls_time=10,
                                             hls_list_size=0,
-                                            hls_segment_filename=input_path
+                                            hls_segment_filename="segment_%03d.ts",
+                                            vcodec='copy',
+                                            acodec='copy'
                                             ).run()
-    return (download, output_path,input_path)
+    return download, output_path
 
 scheduler = sched.scheduler(time.time, time.sleep)
 
@@ -301,11 +309,15 @@ def check():
     downloads = aria.get_downloads()
     for download in downloads:
         download.update()
-        futures.append(executor.submit(encode, (download)))
+        if download.status == "complete" and download.path.name.split(".")[-1] != "torrent":
+            futures.append(executor.submit(encode, (download)))
 
     for future in futures:
         if future.done():
-            upload_executor.submit(upload,future.result())
+            print("alright")
+            result = future.result()
+            upload_executor.submit(upload,result)
+            print(download.name,flush=True)
 
     print("scan")
     scheduler.enter(3, 1, check, ())
@@ -318,6 +330,6 @@ def start_scheduler():
 
 
 if __name__ == '__main__':
-    # thread = threading.Thread(target=start_scheduler)
-    # thread.start()
+    thread = threading.Thread(target=start_scheduler)
+    thread.start()
     app.run(host="0.0.0.0",port=5001)
