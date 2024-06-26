@@ -71,8 +71,10 @@ def requestDispatcher(method, request_url, header=None):
             "Upgrade-Insecure-Requests": "1",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
-    return requests.request(method, request_url, headers=header)
 
+    result=requests.request(method, request_url, headers=header)
+
+    return result
 
 @app.route('/movie/get_meta', methods=['GET'])
 @cross_origin()
@@ -84,6 +86,7 @@ def get_meta():  # get name of a movie.
     result = instance.execute(get_video_meta.bind((request.args.get("detail_address"),)) )
     result_list = list(result)
 
+
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
         result = list(instance.execute(getStared.bind((request.args.get("userId"),request.args.get("detail_address")))))
@@ -94,7 +97,8 @@ def get_meta():  # get name of a movie.
         return json.dumps(parsed, ensure_ascii=False)
 
     result = requestDispatcher("get", get_detail_url(request.args.get("detail_address")))
-
+    if result is None:
+        return json.dumps([], ensure_ascii=False)
     def handler(result):
         return_result = {}
         body = result.body.div.main
@@ -194,7 +198,8 @@ def searchMovies():
     keyword = request.args.get("keyword")
     page_number = request.args.get("page_number")
     result = requestDispatcher("get", get_search_url(keyword, "zh-CN"))
-
+    if result is None:
+        return json.dumps([], ensure_ascii=True)
     def handler(result):
         return_result = []
         for movie in result.body.div.main.section.div.div.div.next_sibling.next_sibling.section.div.div.children:

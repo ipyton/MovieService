@@ -22,8 +22,8 @@ minio_client = Minio(
     secret_key="admin123",  # 替换为你的 secret key
     secure=False  # 如果使用的是HTTP则设置为False
 )
-bucket_name = "my-bucket"  # 替换为你的桶名称
-directory_path = "path/to/your/folder"  # 替换为你的文件夹路径
+bucket_name = "longvideos"  # 替换为你的桶名称
+directory_path = "./processed"  # 替换为你的文件夹路径
 app = Flask(__name__)
 # CORS(app,  resources={
 #    r"/*": {
@@ -43,7 +43,7 @@ executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 upload_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 futures = []
 # profile = ExecutionProfile(consistency_level=ConsistencyLevel.LOCAL_ONE)
-
+handling_set = set()
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
@@ -57,6 +57,7 @@ update_gid = instance.prepare("update movie.resource set gid = ? where movieId =
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
+support_format = []
 @app.route('/movie/get_source', methods=['POST'])
 @cross_origin()
 def get_source():
@@ -132,7 +133,7 @@ def get_files():
     files = list(files)
     files = [{"file":file.index,"path":file.path.name,"size":file.length} for file in files]
     print(files,flush=True)
-    return files
+    return {"files":files, "gid":gid}
 
 
 @app.route('/movie/select', methods=['POST'])
@@ -140,13 +141,14 @@ def get_files():
 def select_download():
     gid = request.form["gid"]
     select = request.form["place"]
+    print(select, flush=True)
     resource = request.form["resource"]
     movieId = request.form["movieId"]
-    file_to_rename = aria.get_files(gid)[int(select) - 1]
-    aria.client.change_options(gid, {"select-file": select,"index": file_to_rename.index,
-    "path": "cache/" + movieId,"out":gid})
+    file_to_rename = aria.get_download(gid).files[int(select) - 1]
+    aria.client.change_option(gid, {"select-file": select,"index": file_to_rename.index,
+    "dir": os.path.join("cache", movieId),"out":gid,"seed-time":0})
     aria.client.unpause(gid)
-    instance.execute(prepared_query.bind(("downloading",movieId, resource)))
+    instance.execute(prepared_set_status.bind(("downloading",movieId, resource)))
     return "success"
 
 @app.route('/movie/start', methods=['POST'])
@@ -162,7 +164,7 @@ def download():
         return "success"
     source= source.strip()
     if source.split(":")[0] == "magnet":
-        download = aria.add_magnet(source,options={"path":"cache/" + movieId, "pause-metadata": "true"})
+        download = aria.add_magnet(source,options={"dir":os.path.join("cache", movieId), "pause-metadata": "true"})
         instance.execute(prepared, [movieId, source,name, download.gid,"downloading_meta"])
         return download.gid
     else:
@@ -175,7 +177,6 @@ def download():
 @cross_origin()
 def pause():
     gid = request.form["gid"]
-    # instance.execute(prepared, [movieId, source, "paused"])
     download = aria.get_download(gid)
     aria.pause(download)
 
@@ -187,7 +188,6 @@ def batch_pause():
     gids = []
     for movie in movies:
         print(movie)
-        # instance.execute(prepared, (movie["movieId"], movie["source"], "paused"))
         gids.append(movie["gid"])
 
     downloads = aria.get_downloads(gids)
@@ -202,7 +202,6 @@ def batch_resume():
     gids = []
     for movie in movies:
         print(movie)
-        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
         gids.append(movie["gid"])
     downloads = aria.get_downloads(gids)
     aria.resume(downloads)
@@ -225,7 +224,6 @@ def batch_stop():
     gids = []
     for movie in movies:
         print(movie)
-        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
         gids.append(movie["gid"])
     downloads = aria.get_downloads(gids)
     aria.resume(downloads)
@@ -239,7 +237,6 @@ def batch_remove():
     gids = []
     for movie in movies:
         print(movie)
-        # instance.execute(prepared, [movie["movieId"], movie["source"], "downloading"])
         gids.append(movie["gid"])
     downloads = aria.get_downloads(gids)
     aria.remove(downloads)
@@ -252,7 +249,6 @@ def remove():
     movieId = request.form["movieId"]
     gid = request.form["gid"]
     source = request.form["source"]
-    # instance.execute(prepared, [movieId, source, "canceled"])
     download = aria.get_download(gid)
     aria.remove([download])
 
@@ -266,7 +262,7 @@ def get_download_status():
         download.update()
         result_list.append({"name": download.name, "speed": download.download_speed, "gid": download.gid,
                             "total_size": download.total_length, "complete_size": download.completed_length,
-                            "status": download.status})
+                            "status": "complete" if download.total_length == download.completed_length else download.status})
         print(download.name, download.download_speed, download.gid)
     return json.dumps(result_list, ensure_ascii=False)
 
@@ -283,7 +279,7 @@ def upload(result):
                 print(f"File {file} uploaded successfully")
             except S3Error as e:
                 print(f"Failed to upload {file}. Error: {e}")
-    movieId = download.name.split(":")[0]
+    movieId = download.dir.split(":")[0]
     instance.execute(prepared_set_status, ["finished", movieId])
 
 
@@ -291,9 +287,11 @@ def encode(download):
     if download is None:
         return None
     name_segment = download.name.split(":")
-    output_path = "processed/" + str(download.path).split("/")[-2]
+    output_path = os.path.join("processed",  str(download.dir).split("/")[-2])
 
-    ffmpeg.input(download.path).output(output_path+ "/" + "index.m3u8",
+    print("297" + str(output_path))
+    print(download.dir, flush=True)
+    ffmpeg.input("./" + download.dir + "/" + download.name).output(os.path.join(output_path, "index.m3u8"),
                                             format="hls",
                                             hls_time=10,
                                             hls_list_size=0,
@@ -306,20 +304,30 @@ def encode(download):
 scheduler = sched.scheduler(time.time, time.sleep)
 
 def check():
+
     downloads = aria.get_downloads()
-    for download in downloads:
+    for download in downloads :
+        if download in handling_set:
+            continue
         download.update()
-        if download.status == "complete" and download.path.name.split(".")[-1] != "torrent":
+        print("-----" + str(download.name), flush=True)
+        if (download.status == "complete" and download.name.split(".")[-1] != "torrent"
+                and download.total_length == download.completed_length) and not download.is_metadata:
+            files = list(download.files)
+            print(files,flush=True)
             futures.append(executor.submit(encode, (download)))
+            handling_set.add(download)
+
 
     for future in futures:
-        if future.done():
+        if future.done() and future.exception() is not None:
             print("alright")
             result = future.result()
+            futures.remove(future)
             upload_executor.submit(upload,result)
-            print(download.name,flush=True)
-
+            print("---" + str(download.name),flush=True)
     print("scan")
+
     scheduler.enter(3, 1, check, ())
 
 
