@@ -17,7 +17,7 @@ from minio.error import S3Error
 import threading
 import os
 minio_client = Minio(
-    "localhost",  # MinIO server地址
+    "localhost:9000",  # MinIO server地址
     access_key="admin",  # 替换为你的 access key
     secret_key="admin123",  # 替换为你的 secret key
     secure=False  # 如果使用的是HTTP则设置为False
@@ -69,15 +69,15 @@ def get_source():
 
     gids = []
     for (movieid, resource,name, gid,status) in result:
-        if gid is None or len(gid) == 0:
-            result_list.append({"movieId": movieid, "source": resource,  "name":name})
-            continue
-        try:
-            download = aria.get_download(gid)
-        except:
-            result_list.append({"movieId": movieid, "source": resource, "gid": ""})
-            continue
-        result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": status})
+        if gid != None and len(gid):
+            try:
+                download = aria.get_download(gid)
+            except:
+                result_list.append({"movieId": movieid, "source": resource, "gid": "", "status": status})
+                continue
+        else:
+            result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": status})
+
 
     return json.dumps(result_list, ensure_ascii=False)
 
@@ -95,7 +95,7 @@ def add_source():
         return "error"
     print(movieId)
     print(source)
-    instance.execute(prepared.bind((movieId, source, name,"" , "init")))
+    instance.execute(prepared.bind((movieId.strip(), source.strip(), name.strip(), "" , "init")))
 
     return "success"
 
@@ -111,6 +111,8 @@ def remove_source():
         return "error"
     instance.execute(prepared_delete.bind((movieId, source)))
     return "success"
+
+
 
 @app.route('/movie/get_files', methods=['POST'])
 @cross_origin()
@@ -136,6 +138,9 @@ def get_files():
     return {"files":files, "gid":gid}
 
 
+
+
+
 @app.route('/movie/select', methods=['POST'])
 @cross_origin()
 def select_download():
@@ -146,9 +151,9 @@ def select_download():
     movieId = request.form["movieId"]
     file_to_rename = aria.get_download(gid).files[int(select) - 1]
     aria.client.change_option(gid, {"select-file": select,"index": file_to_rename.index,
-    "dir": os.path.join("cache", movieId),"out":gid,"seed-time":0})
+    "dir": os.path.join("./cache", movieId,resource),"out":gid,"seed-time":0})
     aria.client.unpause(gid)
-    instance.execute(prepared_set_status.bind(("downloading",movieId, resource)))
+    instance.execute(prepared_set_status.bind(("downloading",movieId.strip(), resource.strip())))
     return "success"
 
 @app.route('/movie/start', methods=['POST'])
@@ -164,7 +169,7 @@ def download():
         return "success"
     source= source.strip()
     if source.split(":")[0] == "magnet":
-        download = aria.add_magnet(source,options={"dir":os.path.join("cache", movieId), "pause-metadata": "true"})
+        download = aria.add_magnet(source,options={"dir":os.path.join("./cache", movieId,source), "pause-metadata": "true"})
         instance.execute(prepared, [movieId, source,name, download.gid,"downloading_meta"])
         return download.gid
     else:
@@ -206,6 +211,7 @@ def batch_resume():
     downloads = aria.get_downloads(gids)
     aria.resume(downloads)
     return "success"
+
 
 
 @app.route('/movie/resume', methods=['POST'])
@@ -267,65 +273,71 @@ def get_download_status():
     return json.dumps(result_list, ensure_ascii=False)
 
 def upload(result):
-    (download, output_path) = result
+    (download, idx, output_path) = result
+    print(download, idx, output_path)
     for root, dirs, files in os.walk(output_path):
         for file in files:
             file_path = os.path.join(root, file)
-            object_name = os.path.relpath(file_path, directory_path)
+            object_name = os.path.relpath(file_path, root)
+            print(root, flush=True)
+            print(file_path,  flush=True)
             try:
                 minio_client.fput_object(
-                    bucket_name, object_name, file_path
+                    bucket_name, str(file_path)[2:], file_path
                 )
-                print(f"File {file} uploaded successfully")
+                print(f"File {file} uploaded successfully",flush=True)
             except S3Error as e:
-                print(f"Failed to upload {file}. Error: {e}")
+                print(f"Failed to upload {file}. Error: {e}",flush=True)
+            except Exception as e:
+                print(e)
     movieId = download.dir.split(":")[0]
-    instance.execute(prepared_set_status, ["finished", movieId])
+    instance.execute(prepared_set_status, ["finished", movieId,str(download.dir)[1:]].strip())
+    aria.remove(download,force=True)
+
 
 
 def encode(download):
     if download is None:
         return None
-    name_segment = download.name.split(":")
-    output_path = os.path.join("processed",  str(download.dir).split("/")[-2])
-
-    print("297" + str(output_path))
-    print(download.dir, flush=True)
-    ffmpeg.input("./" + download.dir + "/" + download.name).output(os.path.join(output_path, "index.m3u8"),
-                                            format="hls",
-                                            hls_time=10,
-                                            hls_list_size=0,
-                                            hls_segment_filename="segment_%03d.ts",
-                                            vcodec='copy',
-                                            acodec='copy'
-                                            ).run()
-    return download, output_path
+    print(download.gid,flush=True)
+    idx = 0
+    for file in download.files:
+        if file.selected and not file.is_metadata:
+            idx = file.index
+            print(file.path,flush=True)
+            output_path = "./processed"+str(download.dir)
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            ffmpeg.probe("./" + file.path)
+            ffmpeg.input(os.path.join("./", file.path), fflags='+genpts').output(os.path.join(output_path, "index.m3u8"),
+                                                    format="hls",
+                                                    hls_time=10,
+                                                    hls_list_size=0,
+                                                    hls_segment_filename=os.path.join(output_path, "segment_%03d.ts"),
+                                                    vcodec='copy',
+                                                    acodec='copy'
+                                                    ).run()
+    return (download, idx, output_path)
 
 scheduler = sched.scheduler(time.time, time.sleep)
 
 def check():
 
     downloads = aria.get_downloads()
-    for download in downloads :
-        if download in handling_set:
+    for download in downloads:
+        if download.name in handling_set:
             continue
         download.update()
-        print("-----" + str(download.name), flush=True)
-        if (download.status == "complete" and download.name.split(".")[-1] != "torrent"
-                and download.total_length == download.completed_length) and not download.is_metadata:
-            files = list(download.files)
-            print(files,flush=True)
+        if (download.total_length == download.completed_length and download.is_metadata == False and (download.status=="active" or download.status=="complete")):
             futures.append(executor.submit(encode, (download)))
-            handling_set.add(download)
-
+            handling_set.add(download.name)
 
     for future in futures:
-        if future.done() and future.exception() is not None:
-            print("alright")
+        print(future,flush=True)
+        if future.done() and future.exception() is None:
             result = future.result()
             futures.remove(future)
             upload_executor.submit(upload,result)
-            print("---" + str(download.name),flush=True)
     print("scan")
 
     scheduler.enter(3, 1, check, ())
@@ -340,4 +352,4 @@ def start_scheduler():
 if __name__ == '__main__':
     thread = threading.Thread(target=start_scheduler)
     thread.start()
-    app.run(host="0.0.0.0",port=5001)
+    app.run(host="0.0.0.0", port=5001)

@@ -28,7 +28,7 @@ instance = cluster.connect()
 insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
 get_video_meta = instance.prepare("select * from movie.meta where movieId=?")
 getStared = instance.prepare("select movieId from movie.movieGallery where userId = ? and movieId=?")
-
+get_play_information = instance.prepare("select * from movie.resource where movieId=? and resource=?")
 # instance.row_factory = dict_factory
 # 完成认证功能
 def get_url_base():
@@ -243,8 +243,14 @@ def searchMovies():
 
     return resolveMeta(result.text, handler)
 
+@app.route("/movie/get_play_information", methods=["GET"])
+@cross_origin()
+def get_play_information():
+    keyword = request.args.get("keyword")
+    page_number = request.args.get("page_number")
 
 @app.route('/movie/get_suggestions')
+@cross_origin()
 def get_suggestions():
     print(request.args.get("keyword"))
     return "this is suggestion method"
