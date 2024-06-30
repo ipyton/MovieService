@@ -16,6 +16,8 @@ from minio import Minio
 from minio.error import S3Error
 import threading
 import os
+import subprocess
+
 minio_client = Minio(
     "localhost:9000",  # MinIO server地址
     access_key="admin",  # 替换为你的 access key
@@ -120,7 +122,10 @@ def get_files():
     gid = request.form["gid"]
     movieId = request.form["movieId"]
     resource = request.form["resource"]
-    status = aria.get_download(gid)
+    try:
+        status = aria.get_download(gid)
+    except Exception as e:
+        return {"files":"invalid gid"}
     if status is None:
         return "404"
     elif status.followed_by_ids:
@@ -150,8 +155,10 @@ def select_download():
     resource = request.form["resource"]
     movieId = request.form["movieId"]
     file_to_rename = aria.get_download(gid).files[int(select) - 1]
+
+    print("path" + "./cache/"+ movieId+ "/"+ resource)
     aria.client.change_option(gid, {"select-file": select,"index": file_to_rename.index,
-    "dir": os.path.join("./cache", movieId,resource),"out":gid,"seed-time":0})
+    "dir": "./cache/"+ movieId+ "/"+ resource,"out":gid,"seed-time":0})
     aria.client.unpause(gid)
     instance.execute(prepared_set_status.bind(("downloading",movieId.strip(), resource.strip())))
     return "success"
@@ -167,9 +174,13 @@ def download():
     rows = list(rows)
     if len(rows) !=0 and rows[0].status == "finished":
         return "success"
+
     source= source.strip()
     if source.split(":")[0] == "magnet":
-        download = aria.add_magnet(source,options={"dir":os.path.join("./cache", movieId,source), "pause-metadata": "true"})
+        print("path0" + "./cache/"+ movieId+ "/"+ source)
+        if not os.path.exists("./cache/"+ movieId+ "/"+ source):
+            os.makedirs("./cache/"+ movieId+ "/"+ source)
+        download = aria.add_magnet(source,options={"dir":"./cache/"+ movieId+ "/"+ source, "pause-metadata": "true"})
         instance.execute(prepared, [movieId, source,name, download.gid,"downloading_meta"])
         return download.gid
     else:
@@ -289,12 +300,59 @@ def upload(result):
             except S3Error as e:
                 print(f"Failed to upload {file}. Error: {e}",flush=True)
             except Exception as e:
-                print(e)
-    movieId = download.dir.split(":")[0]
-    instance.execute(prepared_set_status, ["finished", movieId,str(download.dir)[1:]].strip())
-    aria.remove(download,force=True)
+                print(e,flush=True)
+    print("qasasdasd")
+    print(download.dir, flush=True)
+    movieId = "/" + "/".join(str(download.dir).split("/")[1:-1])
+    print(movieId)
+
+    instance.execute(prepared_set_status, ["finished", movieId,str(download.dir).split("/")[-1]])
+    print("success", flush=True)
+    aria.remove([download],force=True)
+    print("fi", flush=True)
 
 
+def get_codec_name(video_path):
+    command = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', video_path
+    ]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    return result.stdout.strip()
+
+# def encode(download):
+#     if download is None:
+#         return None
+#
+#     for file in download.files:
+#         if file.selected and not file.is_metadata:
+#             idx = file.index
+#             print(file.path,flush=True)
+#             output_path = "./processed"+str(download.dir)
+#             if not os.path.exists(output_path):
+#                 os.makedirs(output_path)
+#         input_path = os.path.join(input_dir, filename)
+#         if os.path.isfile(input_path):
+#             file_base, _ = os.path.splitext(filename)
+#             output_path = os.path.join(output_dir, f"{file_base}.m3u8")
+#             segment_path = os.path.join(output_dir, f"{file_base}_segment_%03d.ts")
+#
+#             codec = get_codec_name(input_path)
+#
+#             if codec == 'h264':
+#                 command = [
+#                     'ffmpeg', '-i', input_path, '-c', 'copy', '-hls_time', '10', '-hls_list_size', '0',
+#                     '-hls_segment_filename', segment_path, output_path
+#                 ]
+#             else:
+#                 command = [
+#                     'ffmpeg', '-i', input_path, '-c:v', 'h264_nvenc', '-c:a', 'aac', '-strict', '-2',
+#                     '-hls_time', '10', '-hls_list_size', '0', '-hls_segment_filename', segment_path, output_path
+#                 ]
+#
+#             subprocess.run(command, check=True)
+#
+#     print(f"All files have been processed and saved to {output_dir}.")
 
 def encode(download):
     if download is None:
@@ -304,20 +362,35 @@ def encode(download):
     for file in download.files:
         if file.selected and not file.is_metadata:
             idx = file.index
-            print(file.path,flush=True)
-            output_path = "./processed"+str(download.dir)
+            print("file path" + str(file.path),flush=True)
+            output_path = "./processed/"+ "/".join(str(download.dir).split("/")[1:])
+            print(output_path,flush=True)
             if not os.path.exists(output_path):
                 os.makedirs(output_path)
-            ffmpeg.probe("./" + file.path)
-            ffmpeg.input(os.path.join("./", file.path), fflags='+genpts').output(os.path.join(output_path, "index.m3u8"),
-                                                    format="hls",
-                                                    hls_time=10,
-                                                    hls_list_size=0,
-                                                    hls_segment_filename=os.path.join(output_path, "segment_%03d.ts"),
-                                                    vcodec='copy',
-                                                    acodec='copy'
-                                                    ).run()
-    return (download, idx, output_path)
+            print("-=-=-=-=-=-=-=-=-23=-4234234234-=-=-=-=-=-=-=234234234324-=-=-",flush=True)
+            print(ffmpeg.probe("./" + str(file.path)),flush=True)
+            meta = ffmpeg.probe("./" + str(file.path))
+            for stream in meta["streams"]:
+                if stream['codec_name'] == 'h264':
+                    ffmpeg.input(os.path.join("./", file.path)).output(os.path.join(output_path, "index.m3u8"),
+                                                            format="hls",
+                                                            hls_time=10,
+                                                            hls_list_size=0,
+                                                            hls_segment_filename=os.path.join(output_path, "segment_%03d.ts"),
+                                                            vcodec='copy',
+                                                            acodec='copy'
+                                                            ).run()
+                    return (download, idx, output_path)
+                else:
+                    ffmpeg.input(os.path.join("./", file.path)).output(os.path.join(output_path, "index.m3u8"),
+                                                            format="hls",
+                                                            hls_time=10,
+                                                            hls_list_size=0,
+                                                            hls_segment_filename=os.path.join(output_path, "segment_%03d.ts"),
+                                                            vcodec='libx264',
+                                                            acodec='copy'
+                                                            ).run()
+                    return (download, idx, output_path)
 
 scheduler = sched.scheduler(time.time, time.sleep)
 
@@ -338,6 +411,8 @@ def check():
             result = future.result()
             futures.remove(future)
             upload_executor.submit(upload,result)
+        if future.exception() is not None:
+            print(future.exception(), flush=True)
     print("scan")
 
     scheduler.enter(3, 1, check, ())
