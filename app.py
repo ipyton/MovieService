@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
-from cassandra.query import dict_factory
+
+from confluent_kafka import KafkaException, Consumer, Producer
 from flask import Flask
 from flask import request
 from cassandra.cluster import Cluster
@@ -11,14 +12,17 @@ from flask_cors import CORS, cross_origin
 import sys
 import sys
 import io
-
+import threading
+from utils import movieEncodingUtil
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 import MovieParser
 
+
+
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 
-cluster = Cluster(['192.168.23.129'], auth_provider=auth_provider)
+cluster = Cluster(['localhost'])
 
 app = Flask(__name__)
 cors = CORS(app, resources={r"*": {"origins": "*","methods": "*", "headers":"*"}})
@@ -29,8 +33,76 @@ insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, i
 get_video_meta = instance.prepare("select * from movie.meta where movieId=?")
 getStared = instance.prepare("select movieId from movie.movieGallery where userId = ? and movieId=?")
 get_play_information = instance.prepare("select * from movie.resource where movieId=? and resource=?")
-# instance.row_factory = dict_factory
-# 完成认证功能
+
+
+
+
+KAFKA_BROKER = "localhost:9092"
+KAFKA_TOPIC = "test_topic"
+KAFKA_GROUP_ID = "flask-consumer-group"
+
+# Global variable to store messages
+messages = []
+
+KAFKA_BROKER = "localhost:9092"  # 修改为你的 Kafka 服务器地址
+KAFKA_TOPIC = "test_topic"
+
+# 创建 Producer 实例
+producer = Producer({
+    'bootstrap.servers': KAFKA_BROKER
+})
+
+
+def delivery_report(err, msg):
+    """回调函数，用于处理消息发送结果"""
+    if err is not None:
+        print(f"消息发送失败: {err}")
+    else:
+        print(f"消息成功发送到 {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
+
+# 发送消息
+def send_message(value):
+    producer.produce(KAFKA_TOPIC, key="key1", value=value, callback=delivery_report)
+    producer.flush()  # 确保消息发送
+
+
+
+def kafka_consumer():
+    conf = {
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': KAFKA_GROUP_ID,
+        'auto.offset.reset': 'earliest'
+    }
+    consumer = Consumer(conf)
+    consumer.subscribe([KAFKA_TOPIC])
+
+    try:
+        while True:
+            msg = consumer.poll(timeout=1.0)  # Poll messages with timeout
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaException._PARTITION_EOF:
+                    continue
+                else:
+                    print(f"Consumer error: {msg.error()}")
+                    continue
+            data = json.loads(msg.value)
+            result = movieEncodingUtil.encodeHls(data.input_path, data.ouput_path, data.input_source, data.output_source)
+            if result:
+                send_message(json.dumps({"resource_id":data.resource_id, "input_path":data.output_path, "type":data.type }))
+            else:
+                print("encoding error!!!")
+
+
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        consumer.close()
+
+threading.Thread(target=kafka_consumer, daemon=True).start()
+
+
 def get_url_base():
     return "https://www.themoviedb.org"
 

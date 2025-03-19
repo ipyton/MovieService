@@ -367,8 +367,6 @@ def encode(download):
             print(output_path,flush=True)
             if not os.path.exists(output_path):
                 os.makedirs(output_path)
-            print("-=-=-=-=-=-=-=-=-23=-4234234234-=-=-=-=-=-=-=234234234324-=-=-",flush=True)
-            print(ffmpeg.probe("./" + str(file.path)),flush=True)
             meta = ffmpeg.probe("./" + str(file.path))
             for stream in meta["streams"]:
                 if stream['codec_name'] == 'h264':
@@ -421,6 +419,8 @@ def check():
 def start_scheduler():
     scheduler.enter(5, 1, check)
     scheduler.run()
+
+
 
 
 
