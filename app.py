@@ -15,7 +15,7 @@ import io
 import threading
 from utils import movieEncodingUtil
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
+import re
 import MovieParser
 
 
@@ -29,10 +29,12 @@ cors = CORS(app, resources={r"*": {"origins": "*","methods": "*", "headers":"*"}
 app.config['CORS_HEADERS'] = 'Content-Type'
 
 instance = cluster.connect()
-insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
-get_video_meta = instance.prepare("select * from movie.meta where movieId=?")
-getStared = instance.prepare("select movieId from movie.movieGallery where userId = ? and movieId=?")
-get_play_information = instance.prepare("select * from movie.resource where movieId=? and resource=?")
+insert_meta = instance.prepare("insert into movie.meta (resource_id,poster, score, introduction, movie_name, tags,"
+                               " actor_list, release_year, level, picture_list, maker_list, genre_list,type,language) "
+                               " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+get_video_meta = instance.prepare("select * from movie.meta where resource_id=? and type = ? and language = ?")
+getStared = instance.prepare("select * from movie.movieGallery where user_id = ? and resource_id=? and type = ?")
+get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and resource=?")
 
 
 
@@ -44,8 +46,6 @@ KAFKA_GROUP_ID = "flask-consumer-group"
 # Global variable to store messages
 messages = []
 
-KAFKA_BROKER = "localhost:9092"  # 修改为你的 Kafka 服务器地址
-KAFKA_TOPIC = "test_topic"
 
 # 创建 Producer 实例
 producer = Producer({
@@ -88,7 +88,7 @@ def kafka_consumer():
                     print(f"Consumer error: {msg.error()}")
                     continue
             data = json.loads(msg.value)
-            result = movieEncodingUtil.encodeHls(data.input_path, data.ouput_path, data.input_source, data.output_source)
+            result = movieEncodingUtil.encodeHls(data.inputPath, data.ouputPath, data.inputSource, data.outputSource)
             if result:
                 send_message(json.dumps({"resource_id":data.resource_id, "input_path":data.output_path, "type":data.type }))
             else:
@@ -111,8 +111,8 @@ def get_search_url(keyword, language):
     return get_url_base() + "/search?query=" + keyword + "&language=" + language
 
 
-def get_detail_url(url):
-    return get_url_base() + url
+def get_detail_url(type, id, language):
+    return get_url_base() + "/" + type + "/" + id + "?language=" + language
 
 
 def save_to_database(metadata):
@@ -148,27 +148,49 @@ def requestDispatcher(method, request_url, header=None):
 
     return result
 
+
+
 @app.route('/movie/get_meta', methods=['GET'])
 @cross_origin()
 def get_meta():  # get name of a movie.
-    print(request.args.get("detail_address") + "===========",flush=True)
     # print(get_detail_url(request.args.get("detail_address")))
-    if request.args.get("detail_address") is None:
-        return "error"
-    result = instance.execute(get_video_meta.bind((request.args.get("detail_address"),)) )
-    result_list = list(result)
+    language = request.headers["Accept-Language"]
 
+    if language is None:
+        language = "en-US"
+    # if
+    # if request.args.get("detail_address") is None:
+    #     return "error"
+    # detail_address = request.args.get("detail_address")
+    # print(detail_address, flush=True)
+    # match = re.search(r"/([^/]+)/([^/?]+)", detail_address)
+    #
+    # if match:
+    #     type = match.group(1)  # 'person'
+    #     id = match.group(2)  # '3264284-gongfu-wang'
+    #     print("Category:", type)
+    #     print("Identifier:", id)
+    # else:
+    #     return "url resolving error"
+
+    type = request.args.get("type")
+    id = request.args.get("id")
+    if type is None or id is None:
+        print("get meta error", flush=True)
+        return "parameters are not sufficient"
+    result = instance.execute(get_video_meta.bind((type, id, language)) )
+    result_list = list(result)
 
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
-        result = list(instance.execute(getStared.bind((request.args.get("userId"),request.args.get("detail_address")))))
+        result = list(instance.execute(getStared.bind((request.args.get("userId"), type, id))))
         if len(result) != 0:
             print("has result")
             parsed["stared"] = True
 
         return json.dumps(parsed, ensure_ascii=False)
 
-    result = requestDispatcher("get", get_detail_url(request.args.get("detail_address")))
+    result = requestDispatcher("get", get_detail_url(type, id, language))
     if result is None:
         return json.dumps([], ensure_ascii=False)
     def handler(result):
@@ -255,9 +277,12 @@ def get_meta():  # get name of a movie.
         return_result["pictureList"] = picturesList
         return_result["makerList"] = makersDict
         return_result["genre_list"] = genresList
+        return_result["type"] = type
+        return_result["language"] = language
 
 # insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
-        instance.execute(insert_meta, (request.args.get("detail_address") , poster, score, introduction, movie_name, tag, actressList, release_year, level, picturesList, makersDict, genresList))
+        instance.execute(insert_meta, (id, poster, score, introduction, movie_name, tag, actressList,
+                                       release_year, level, picturesList, makersDict, genresList,type,language))
 
         return json.dumps(return_result, ensure_ascii=False)
 
@@ -269,7 +294,8 @@ def get_meta():  # get name of a movie.
 def searchMovies():
     keyword = request.args.get("keyword")
     page_number = request.args.get("page_number")
-    result = requestDispatcher("get", get_search_url(keyword, "zh-CN"))
+    accept_language = request.headers["Accept-Language"]
+    result = requestDispatcher("get", get_search_url(keyword, accept_language))
     if result is None:
         return json.dumps([], ensure_ascii=True)
     def handler(result):
@@ -308,9 +334,19 @@ def searchMovies():
             #     print(response)
 
             # print(movie)
+            match = re.search(r"/([^/]+)/([^/?]+)", detail_address)
+
+            if match:
+                type = match.group(1)  # 'person'
+                id = match.group(2)  # '3264284-gongfu-wang'
+                print("Category:", type)
+                print("Identifier:", id)
+            else:
+                return "url resolving error"
             return_result.append(
                 {"image_address": img_address, "translated_name": translated_name, "original_name": original_name,
-                 "release_date": release_date, "introduction": introduction, "detail_address": detail_address})
+                 "release_date": release_date, "introduction": introduction, "detail_address": detail_address,
+                 "type": type, "id":id})
         return json.dumps(return_result, ensure_ascii=False)
 
     return resolveMeta(result.text, handler)
@@ -329,4 +365,4 @@ def get_suggestions():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host="0.0.0.0", port=5000)

@@ -19,10 +19,10 @@ import os
 import subprocess
 
 minio_client = Minio(
-    "localhost:9000",  # MinIO server地址
-    access_key="admin",  # 替换为你的 access key
-    secret_key="admin123",  # 替换为你的 secret key
-    secure=False  # 如果使用的是HTTP则设置为False
+    "localhost:9000",
+    access_key="admin",
+    secret_key="admin123",
+    secure=False
 )
 bucket_name = "longvideos"  # 替换为你的桶名称
 directory_path = "./processed"  # 替换为你的文件夹路径
@@ -301,8 +301,6 @@ def upload(result):
                 print(f"Failed to upload {file}. Error: {e}",flush=True)
             except Exception as e:
                 print(e,flush=True)
-    print("qasasdasd")
-    print(download.dir, flush=True)
     movieId = "/" + "/".join(str(download.dir).split("/")[1:-1])
     print(movieId)
 
