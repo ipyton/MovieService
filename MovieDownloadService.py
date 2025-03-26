@@ -50,54 +50,60 @@ auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra"
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
-prepared = instance.prepare(query="insert into movie.resource (movieId, resource, name, gid, status) values (?,?,?,?,?)")
-prepared_query = instance.prepare("select * from movie.resource where movieId = ?")
-prepared_query_for_download = instance.prepare("select * from movie.resource where movieId=? and resource=?")
-prepared_delete = instance.prepare("delete from movie.resource where movieId = ? and resource = ?")
-prepared_set_status = instance.prepare("update movie.resource set status = ? where movieId = ? and resource=?")
-update_gid = instance.prepare("update movie.resource set gid = ? where movieId = ? and resource = ?")
+prepared = instance.prepare(query="insert into movie.resource (resource_id, type, resource, name, gid, status) values (?,?,?,?,?,?)")
+prepared_query = instance.prepare("select * from movie.resource where resource_id = ? and type = ?")
+prepared_query_for_download = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource = ?")
+prepared_delete = instance.prepare("delete from movie.resource where resource_id = ? and type = ? and resource = ?")
+prepared_set_status = instance.prepare("update movie.resource set status = ? where resource_id  = ? and type = ? and resource=?")
+update_gid = instance.prepare("update movie.resource set gid = ? where resource_id = ? and type = ? and resource = ?")
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
 support_format = []
-@app.route('/movie/get_source', methods=['POST'])
+@app.route('/movie/get_sources', methods=['POST'])
 @cross_origin()
-def get_source():
-    movieId = request.form["movieId"]
-    if movieId is None:
-        return "error"
-    result = instance.execute(prepared_query, [movieId])
-    result_list = []
+def get_sources():
+    data = request.get_json()
+    resource_id = data.get("resourceId")
+    type = data.get("type")
+    print(resource_id is None)
+    print(type is None,flush=True)
+    if resource_id is None or type is None:
+        print("resourceId is null", flush=True)
+        return "error", 400  # Return 400 explicitly if movieId is missing
+    result = instance.execute(prepared_query, [resource_id,type])
 
+    result_list = []
     gids = []
-    for (movieid, resource,name, gid,status) in result:
+    # for i in result:
+    #     print(i, flush=True)
+    for (resource_id,type, resource, name, gid, status) in result:
+        print(resource_id, resource, name, gid, status, flush=True)
         if gid != None and len(gid):
             try:
                 download = aria.get_download(gid)
             except:
-                result_list.append({"movieId": movieid, "source": resource, "gid": "", "status": status})
+                result_list.append({"resourceId": resource_id,"type":type,  "source": resource, "gid": "", "status": status})
                 continue
         else:
-            result_list.append({"movieId": movieid, "source": resource, "gid": gid, "status": status})
+            result_list.append({"resourceId": resource_id,"type":type,  "source": resource, "gid": gid, "status": status})
 
-
+    print(result_list, flush=True)
     return json.dumps(result_list, ensure_ascii=False)
-
 
 @app.route('/movie/add_source', methods=['POST'])
 @cross_origin()
 def add_source():
-    print(request.method)
-    movieId = request.form["movieId"]
-    source = request.form["source"]
-    name = request.form["name"]
-    print(movieId)
-    print(source)
-    if movieId is None or source is None:
-        return "error"
-    print(movieId)
-    print(source)
-    instance.execute(prepared.bind((movieId.strip(), source.strip(), name.strip(), "" , "init")))
+    json = request.get_json()
+    resource_id = json.get("resourceId")
+    source = json.get("source")
+    name = json.get("name")
+    type = json.get("type")
+    if resource_id is None or type is None or source is None or name is None :
+        print("resourceId is null", flush=True)
+        return "error", 400
+
+    instance.execute(prepared.bind((resource_id.strip(),type, source.strip(), name.strip(), "" , "init")))
 
     return "success"
 
@@ -105,13 +111,14 @@ def add_source():
 @app.route('/movie/remove_source', methods=['POST'])
 @cross_origin()
 def remove_source():
-    movieId = request.form["movieId"]
-    source = request.form["source"]
-    print(movieId)
-    print(source)
-    if movieId is None or source is None:
+    json = request.get_json()
+
+    resourceId = json.get("resourceId")
+    type = json.get("type")
+    source = json.get("source")
+    if resourceId is None or source is None or type is None :
         return "error"
-    instance.execute(prepared_delete.bind((movieId, source)))
+    instance.execute(prepared_delete.bind((resourceId, type, source)))
     return "success"
 
 
@@ -421,8 +428,7 @@ def start_scheduler():
 
 
 
-
 if __name__ == '__main__':
-    thread = threading.Thread(target=start_scheduler)
-    thread.start()
+    # thread = threading.Thread(target=start_scheduler)
+    # thread.start()
     app.run(host="0.0.0.0", port=5001)

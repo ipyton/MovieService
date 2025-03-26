@@ -1,4 +1,6 @@
 import os
+import traceback
+
 import ffmpeg
 def encodeHls(input_path, output_path, input_source, output_sourcce):
     try:
@@ -29,7 +31,7 @@ def encodeHls(input_path, output_path, input_source, output_sourcce):
                                                                    ).run()
                 return True
     except Exception as e:
-        print(e)
+        traceback.print_exc()
         return False
 
-    return False
+    return True

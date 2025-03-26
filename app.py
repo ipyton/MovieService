@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 import json
+import logging
+import time
+import traceback
 
 from confluent_kafka import KafkaException, Consumer, Producer
+from django.core.files.uploadedfile import UploadedFile
 from flask import Flask
 from flask import request
 from cassandra.cluster import Cluster
@@ -10,38 +14,54 @@ import requests
 from bs4 import BeautifulSoup
 from flask_cors import CORS, cross_origin
 import sys
-import sys
 import io
 import threading
-from utils import movieEncodingUtil
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from utils import movieEncodingUtil, UploadFile
 import re
 import MovieParser
+import os
+from confluent_kafka import Consumer, KafkaException
+import json
 
+
+
+
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+os.environ['FLASK_ENV'] = 'development'
+os.environ['FLASK_DEBUG'] = '1'
 
 
 auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra")
 
-cluster = Cluster(['localhost'])
+cluster = Cluster(['127.0.0.1'],port=9042,  # Ensure correct port
+    auth_provider=PlainTextAuthProvider(username="cassandra", password="cassandra"))
+
 
 app = Flask(__name__)
 cors = CORS(app, resources={r"*": {"origins": "*","methods": "*", "headers":"*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
 
 instance = cluster.connect()
+
 insert_meta = instance.prepare("insert into movie.meta (resource_id,poster, score, introduction, movie_name, tags,"
                                " actor_list, release_year, level, picture_list, maker_list, genre_list,type,language) "
                                " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 get_video_meta = instance.prepare("select * from movie.meta where resource_id=? and type = ? and language = ?")
 getStared = instance.prepare("select * from movie.movieGallery where user_id = ? and resource_id=? and type = ?")
-get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and resource=?")
-
-
+get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource=?")
+check_upload_status = instance.prepare("select status_code from files.file_upload_status where resource_id = ? and resource_type = ?;")
+set_upload_status = instance.prepare("update files.file_upload_status set status_code = ? where resource_id = ? and resource_type = ?")
 
 
 KAFKA_BROKER = "localhost:9092"
-KAFKA_TOPIC = "test_topic"
 KAFKA_GROUP_ID = "flask-consumer-group"
+
+conf ={
+    'bootstrap.servers': KAFKA_BROKER,
+    'group.id': KAFKA_GROUP_ID,
+    'auto.offset.reset': 'earliest'
+}
 
 # Global variable to store messages
 messages = []
@@ -52,55 +72,20 @@ producer = Producer({
     'bootstrap.servers': KAFKA_BROKER
 })
 
-
 def delivery_report(err, msg):
     """回调函数，用于处理消息发送结果"""
     if err is not None:
-        print(f"消息发送失败: {err}")
+        print(f"failed sending message: {err}",flush=True)
     else:
-        print(f"消息成功发送到 {msg.topic()} [{msg.partition()}] @ {msg.offset()}")
+        print(f"successfully sent message: {msg.topic()} [{msg.partition()}] @ {msg.offset()}",flush = True)
 
 # 发送消息
-def send_message(value):
-    producer.produce(KAFKA_TOPIC, key="key1", value=value, callback=delivery_report)
+def send_message(key, value):
+    producer.produce("fileUploadStage2", key = key, value = value, callback = delivery_report)
     producer.flush()  # 确保消息发送
 
 
 
-def kafka_consumer():
-    conf = {
-        'bootstrap.servers': KAFKA_BROKER,
-        'group.id': KAFKA_GROUP_ID,
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(conf)
-    consumer.subscribe([KAFKA_TOPIC])
-
-    try:
-        while True:
-            msg = consumer.poll(timeout=1.0)  # Poll messages with timeout
-            if msg is None:
-                continue
-            if msg.error():
-                if msg.error().code() == KafkaException._PARTITION_EOF:
-                    continue
-                else:
-                    print(f"Consumer error: {msg.error()}")
-                    continue
-            data = json.loads(msg.value)
-            result = movieEncodingUtil.encodeHls(data.inputPath, data.ouputPath, data.inputSource, data.outputSource)
-            if result:
-                send_message(json.dumps({"resource_id":data.resource_id, "input_path":data.output_path, "type":data.type }))
-            else:
-                print("encoding error!!!")
-
-
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        consumer.close()
-
-threading.Thread(target=kafka_consumer, daemon=True).start()
 
 
 def get_url_base():
@@ -148,51 +133,22 @@ def requestDispatcher(method, request_url, header=None):
 
     return result
 
-
-
-@app.route('/movie/get_meta', methods=['GET'])
-@cross_origin()
-def get_meta():  # get name of a movie.
-    # print(get_detail_url(request.args.get("detail_address")))
-    language = request.headers["Accept-Language"]
-
-    if language is None:
-        language = "en-US"
-    # if
-    # if request.args.get("detail_address") is None:
-    #     return "error"
-    # detail_address = request.args.get("detail_address")
-    # print(detail_address, flush=True)
-    # match = re.search(r"/([^/]+)/([^/?]+)", detail_address)
-    #
-    # if match:
-    #     type = match.group(1)  # 'person'
-    #     id = match.group(2)  # '3264284-gongfu-wang'
-    #     print("Category:", type)
-    #     print("Identifier:", id)
-    # else:
-    #     return "url resolving error"
-
-    type = request.args.get("type")
-    id = request.args.get("id")
-    if type is None or id is None:
-        print("get meta error", flush=True)
-        return "parameters are not sufficient"
-    result = instance.execute(get_video_meta.bind((type, id, language)) )
+def get_meta_with_params(type, id, language):
+    result = instance.execute(get_video_meta.bind((type, id, language)))
     result_list = list(result)
 
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
         result = list(instance.execute(getStared.bind((request.args.get("userId"), type, id))))
         if len(result) != 0:
-            print("has result")
             parsed["stared"] = True
 
         return json.dumps(parsed, ensure_ascii=False)
-
     result = requestDispatcher("get", get_detail_url(type, id, language))
+    print(get_detail_url(type, id, language),flush=True)
     if result is None:
         return json.dumps([], ensure_ascii=False)
+
     def handler(result):
         return_result = {}
         body = result.body.div.main
@@ -213,8 +169,11 @@ def get_meta():  # get name of a movie.
         if level is not None:
             level = level.text
 
-        movie_name = body.find("section", {"class": "images inner"}).section
-        release_year = body.find("span",{"class":"tag release_date"})
+        movie_name = None
+        if body.find("section", {"class": "images inner"}) is not None:
+            movie_name = body.find("section", {"class": "images inner"}).section
+
+        release_year = body.find("span", {"class": "tag release_date"})
 
         if release_year is not None:
             release_year = release_year.text
@@ -242,8 +201,9 @@ def get_meta():  # get name of a movie.
                     character = character.text
 
                 actressList.append(
-                    json.dumps({"actorDetailPage": actorDetail, "character": character, "avatar": avatar, "name": name}, ensure_ascii=False))
-        #print(actressList)
+                    json.dumps({"actorDetailPage": actorDetail, "character": character, "avatar": avatar, "name": name},
+                               ensure_ascii=False))
+        # print(actressList)
         pictures = body.find_all("div", {
             "class": "backdrop glyphicons_v2 picture grey no_image_holder no_border no_border_radius"})
         picturesList = []
@@ -252,14 +212,14 @@ def get_meta():  # get name of a movie.
                 picturesList.append(picture.img["src"])
 
         makers = body.find_all("li", {"class": "profile"})
-        makersDict={}
+        makersDict = {}
         if makers is not None:
             for maker in makers:
                 info = maker.find_all("p")
                 if len(info) == 2:
                     makersDict[info[0].a.text] = info[1].text
         genresList = []
-        genre = body.find("span", {"class" : "genres"})
+        genre = body.find("span", {"class": "genres"})
         if genre is not None:
             genres = genre.find_all("a")
             if genres is not None:
@@ -280,13 +240,33 @@ def get_meta():  # get name of a movie.
         return_result["type"] = type
         return_result["language"] = language
 
-# insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
+        # insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
         instance.execute(insert_meta, (id, poster, score, introduction, movie_name, tag, actressList,
-                                       release_year, level, picturesList, makersDict, genresList,type,language))
+                                       release_year, level, picturesList, makersDict, genresList, type, language))
 
         return json.dumps(return_result, ensure_ascii=False)
 
     return resolveMeta(result.text, handler)
+
+
+@app.route('/movie/get_meta', methods=['GET'])
+@cross_origin()
+def get_meta():  # get name of a movie.
+    # print(get_detail_url(request.args.get("detail_address")))
+    language = request.args.get("Accept-Language")
+    print(language, flush=True)
+    if language is None:
+        language = "en-US"
+    type = request.args.get("type")
+    id = request.args.get("id")
+    if type is None or id is None:
+        print("get meta error", flush=True)
+        return "parameters are not sufficient"
+
+    result = get_meta_with_params(type, id, language)
+    if language != "en-US":
+        get_meta_with_params(type, id, "en-US")
+    return result
 
 
 @app.route("/movie/search", methods=['GET'])
@@ -294,7 +274,10 @@ def get_meta():  # get name of a movie.
 def searchMovies():
     keyword = request.args.get("keyword")
     page_number = request.args.get("page_number")
-    accept_language = request.headers["Accept-Language"]
+    accept_language = request.args.get("Accept-Language")
+    if accept_language is None:
+        accept_language = "en-US"
+
     result = requestDispatcher("get", get_search_url(keyword, accept_language))
     if result is None:
         return json.dumps([], ensure_ascii=True)
@@ -364,5 +347,169 @@ def get_suggestions():
     return "this is suggestion method"
 
 
-if __name__ == '__main__':
+def upload_to_minio():
+    '''
+    stage2 upload to minio
+    :return:
+    '''
+
+
+    conf = {
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': KAFKA_GROUP_ID,
+        'auto.offset.reset': 'earliest',
+        'enable.auto.commit': False  # 关闭自动提交
+    }
+
+    consumer = Consumer(conf)
+    consumer.subscribe(["fileUploadStage2"])
+
+    try:
+        while True:
+            print("status 2 listening", flush=True)
+
+            msg = consumer.poll(timeout=5.0)  # Poll messages with timeout
+            print("status 2 poll", flush=True)
+
+            if msg is None:
+                print("status 2 no", flush=True)
+                continue
+            if msg.error():
+                print(msg.error(),flush=True)
+                traceback.print_exc()
+                if msg.error().code() == KafkaException._PARTITION_EOF:
+                    print("EOF", flush=True)
+                    continue
+                else:
+                    traceback.print_exc()
+                    logging.error(f"Consumer error: {msg.error()}")
+                    continue
+            print(f"Message received {msg.value()}", flush=True)
+            data = json.loads(msg.value())
+            print(data, flush=True)
+            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
+            result = list(result)
+            if len(result) == 0:
+                print(f"No Movie In DB: {msg.key()}")
+                consumer.commit(message=msg)
+                continue
+            if len(result) != 0 and result[0][0] > 4:
+                print(f"No Movie In DB: {msg.key()}")
+                consumer.commit(message=msg)
+                continue
+
+
+            upload_result = UploadFile.upload_files(data["inputPath"], data["bucket"], data["outputPath"])
+            if upload_result:
+                instance.execute(set_upload_status, (5, result["resourceId"], result["type"]))
+
+            else:
+                logging.error("Uploading error!!!")
+
+            # 处理完后手动提交偏移量
+            consumer.commit(message=msg)
+
+    except Exception as e:
+        traceback.print_exc()
+        logging.error(f"Error: {e}")
+    finally:
+        consumer.close()
+
+
+
+
+def kafka_consumer():
+    '''
+        stage 1: encoding.
+    '''
+    logging.info("kafka consumer 1 start")
+
+    conf = {
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': KAFKA_GROUP_ID,
+        'auto.offset.reset': 'earliest',
+        'enable.auto.commit': False  # 关闭自动提交
+    }
+
+    consumer = Consumer(conf)
+    consumer.subscribe(["fileUploadStage1"])
+
+    try:
+        while True:
+            print("status1 listening", flush=True)
+
+            msg = consumer.poll(timeout=5.0)  # Poll messages with timeout
+            if msg is None:
+                continue
+            if msg.error():
+                print(msg.error())
+                if msg.error().code() == KafkaException._PARTITION_EOF:
+                    continue
+                else:
+                    print(f"Consumer error: {msg.error()}")
+                    continue
+
+            logging.info(f"Message received {msg.value()}")
+
+            data = json.loads(msg.value())
+            if data is None:
+                print(f"Consumer error: {msg.key()}")
+                continue
+            print(data, flush=True)
+            # Check the status.
+            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
+            result = list(result)
+            if len(result) == 0:
+                print(f"No Movie In DB: {msg.key()}")
+                consumer.commit(message=msg)
+            if  result[0][0] > 3:
+                consumer.commit(message=msg)
+                continue
+
+
+            # Encoding process
+            encoding_result = movieEncodingUtil.encodeHls(data["inputPath"], data["outputPath"], data["inputSource"],
+                                                 data["outputSource"])
+            if encoding_result:
+                send_message(data["resourceId"] + "_" + data["type"],json.dumps({
+                    "resourceId": data["resourceId"],
+                    "inputPath": data["outputPath"],
+                    "type": data["type"],
+                    "bucket":"longvideos",
+                    "outputPath": "/" + data["type"] + "_" +data["resourceId"],
+                }))
+            else:
+                print("Encoding error!!!", flush=True)
+
+            # 处理完后手动提交偏移量
+            consumer.commit(message=msg)
+            instance.execute(set_upload_status, (4, data["resourceId"], data["type"]))
+
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error: {e}", flush=True)
+    # finally:
+    #     consumer.close()
+
+
+
+try:
+    logging.info("Starting Kafka consumers")
+
+    t1 = threading.Thread(target=kafka_consumer, daemon=True, name="KafkaConsumer1")
+    t2 = threading.Thread(target=upload_to_minio, daemon=True, name="MinioUploader")
+
+    t1.start()
+    t2.start()
+
+    # Import Flask here to avoid circular imports
+    from flask import Flask
+
+    app = Flask(__name__)
+
+    logging.info("Starting Flask application")
     app.run(host="0.0.0.0", port=5000)
+
+except Exception as e:
+    logging.critical(f"Main process error: {e}")
+        # logging.critical(traceback.format_exc())
