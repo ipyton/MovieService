@@ -1,3 +1,5 @@
+import shutil
+
 from minio import Minio
 from minio.error import S3Error
 import os
@@ -33,8 +35,26 @@ def upload_files(inputPath, bucket_name, outputPath):
                 print(object_name)
                 print(file_path)
                 minio_client.fput_object(bucket_name,  object_name, file_path)
-                print(f"成功上传: {file_path} -> {bucket_name}/{object_name}",flush=True)
+                print(f"uploaded successfully: {file_path} -> {bucket_name}/{object_name}",flush=True)
 
     except Exception as e:
-        print(f"上传失败: {file_path}, 错误: {e}", flush=True)
+        print(f"failed uploaded: {file_path}, error: {e}", flush=True)
         return False
+
+def delete_files(inputPath):
+    if os.path.exists(inputPath):
+        shutil.rmtree(inputPath)
+        print(f"have deleted: {inputPath}")
+    else:
+        print("the directory does not exist:", inputPath)
+
+def delete_files_in_minio(bucket, path):
+    objects = minio_client.list_objects(bucket, prefix=path, recursive=True)
+    for obj in objects:
+        try:
+            minio_client.remove_object(bucket, obj.object_name)
+            print(f"Deleted: {obj.object_name}")
+        except Exception as e:
+            print(f"Failed to delete {obj.object_name}: {e}")
+            return False
+    return True

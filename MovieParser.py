@@ -2,8 +2,8 @@ import json
 def parseMovie(movie):
 
     result = {}
-    result['movieId'] = movie.movieid
-    result['actressList'] = list( [] if movie.actress_list is None else movie.actress_list )
+    result['resource_id'] = movie.resource_id
+    result['actressList'] = list( [] if movie.actor_list is None else movie.actor_list )
     result['genre_list'] = list( [] if movie.genre_list is None else movie.genre_list )
     result['introduction'] = movie.introduction
     result['level']=movie.level

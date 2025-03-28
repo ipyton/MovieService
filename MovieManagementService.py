@@ -17,6 +17,7 @@ from minio.error import S3Error
 import threading
 import os
 import subprocess
+import utils.FileManipulator as fileManipulator
 
 minio_client = Minio(
     "localhost:9000",
@@ -50,12 +51,15 @@ auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra"
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
-prepared = instance.prepare(query="insert into movie.resource (resource_id, type, resource, name, gid, status) values (?,?,?,?,?,?)")
+prepared = instance.prepare(query="insert into movie.resource (resource_id, type, resource, name, gid, status,quality) values (?,?,?,?,?,?,?)")
 prepared_query = instance.prepare("select * from movie.resource where resource_id = ? and type = ?")
 prepared_query_for_download = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource = ?")
 prepared_delete = instance.prepare("delete from movie.resource where resource_id = ? and type = ? and resource = ?")
-prepared_set_status = instance.prepare("update movie.resource set status = ? where resource_id  = ? and type = ? and resource=?")
-update_gid = instance.prepare("update movie.resource set gid = ? where resource_id = ? and type = ? and resource = ?")
+prepared_set_status = instance.prepare("update movie.resource set status = ? where resource_id  = ? and type = ? and resource=? and quality = ?")
+update_gid = instance.prepare("update movie.resource set gid = ? where resource_id = ? and type = ? and resource = ? and quality = ?")
+get_file_path = instance.prepare("select * from movie.playable where resource_id = ? and type = ? and quality = ?")
+
+
 
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
@@ -275,6 +279,24 @@ def remove():
     source = request.form["source"]
     download = aria.get_download(gid)
     aria.remove([download])
+
+@app.route("/movie/delete_file")
+@cross_origin()
+def delete_file(resourceId, type, quality):
+    if resourceId is None or type is None or quality is None:
+        return -1, "error"
+    path = instance.execute(get_file_path, (resourceId, type, quality))
+    results = path.all()
+    if len(results) == 0:
+        return -1, "error"
+    if results[0].get("path") is None:
+        return -1, "error"
+    result = fileManipulator.delete_files_in_minio(results[0]["bucket"], results[0]["path"])
+    if result is None or result is False:
+        return -1, "error"
+    return 0,"success"
+    # delete_file(results[0]["bucket"],results[0]["path"])
+
 
 
 @app.route('/movie/get_download_status', methods=['GET'])

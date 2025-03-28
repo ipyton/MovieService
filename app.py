@@ -16,15 +16,12 @@ from flask_cors import CORS, cross_origin
 import sys
 import io
 import threading
-from utils import movieEncodingUtil, UploadFile
+from utils import movieEncodingUtil, FileManipulator
 import re
 import MovieParser
 import os
 from confluent_kafka import Consumer, KafkaException
 import json
-
-
-
 
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -47,12 +44,10 @@ instance = cluster.connect()
 insert_meta = instance.prepare("insert into movie.meta (resource_id,poster, score, introduction, movie_name, tags,"
                                " actor_list, release_year, level, picture_list, maker_list, genre_list,type,language) "
                                " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-get_video_meta = instance.prepare("select * from movie.meta where resource_id=? and type = ? and language = ?")
+get_video_meta = instance.prepare("select * from movie.meta where resource_id = ? and type = ? and language = ?")
 getStared = instance.prepare("select * from movie.movieGallery where user_id = ? and resource_id=? and type = ?")
 get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource=?")
-check_upload_status = instance.prepare("select status_code from files.file_upload_status where resource_id = ? and resource_type = ?;")
-set_upload_status = instance.prepare("update files.file_upload_status set status_code = ? where resource_id = ? and resource_type = ?")
-
+get_playlist = instance.prepare("select * from movie.playable where resource_Id = ? and type = ?;")
 
 KAFKA_BROKER = "localhost:9092"
 KAFKA_GROUP_ID = "flask-consumer-group"
@@ -78,11 +73,6 @@ def delivery_report(err, msg):
         print(f"failed sending message: {err}",flush=True)
     else:
         print(f"successfully sent message: {msg.topic()} [{msg.partition()}] @ {msg.offset()}",flush = True)
-
-# 发送消息
-def send_message(key, value):
-    producer.produce("fileUploadStage2", key = key, value = value, callback = delivery_report)
-    producer.flush()  # 确保消息发送
 
 
 
@@ -134,16 +124,16 @@ def requestDispatcher(method, request_url, header=None):
     return result
 
 def get_meta_with_params(type, id, language):
-    result = instance.execute(get_video_meta.bind((type, id, language)))
+    result = instance.execute(get_video_meta.bind((id, type, language)))
     result_list = list(result)
-
+    print(result_list)
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
         result = list(instance.execute(getStared.bind((request.args.get("userId"), type, id))))
         if len(result) != 0:
             parsed["stared"] = True
-
         return json.dumps(parsed, ensure_ascii=False)
+    print("visit outside", flush=True)
     result = requestDispatcher("get", get_detail_url(type, id, language))
     print(get_detail_url(type, id, language),flush=True)
     if result is None:
@@ -329,7 +319,7 @@ def searchMovies():
             return_result.append(
                 {"image_address": img_address, "translated_name": translated_name, "original_name": original_name,
                  "release_date": release_date, "introduction": introduction, "detail_address": detail_address,
-                 "type": type, "id":id})
+                 "type": type, "resource_id":id})
         return json.dumps(return_result, ensure_ascii=False)
 
     return resolveMeta(result.text, handler)
@@ -337,8 +327,20 @@ def searchMovies():
 @app.route("/movie/get_play_information", methods=["GET"])
 @cross_origin()
 def get_play_information():
-    keyword = request.args.get("keyword")
-    page_number = request.args.get("page_number")
+    resourceId = request.args.get("resourceId")
+    type = request.args.get("type")
+    if resourceId is None or type is None:
+        print("get play information error", flush=True)
+        return -1, "parameters are not sufficient"
+    print(resourceId, flush=True)
+    print(type, flush=True)
+    rs = instance.execute(get_playlist, (resourceId, type))
+    result = []
+    for (resource_id, type, quality, bucket, path) in rs:
+        result.append({"resource_id": resource_id, "type": type, "quality": quality,"bucket": bucket, "path": path})
+
+    return json.dumps(result, ensure_ascii=False)
+
 
 @app.route('/movie/get_suggestions')
 @cross_origin()
@@ -346,170 +348,16 @@ def get_suggestions():
     print(request.args.get("keyword"))
     return "this is suggestion method"
 
-
-def upload_to_minio():
-    '''
-    stage2 upload to minio
-    :return:
-    '''
-
-
-    conf = {
-        'bootstrap.servers': KAFKA_BROKER,
-        'group.id': KAFKA_GROUP_ID,
-        'auto.offset.reset': 'earliest',
-        'enable.auto.commit': False  # 关闭自动提交
-    }
-
-    consumer = Consumer(conf)
-    consumer.subscribe(["fileUploadStage2"])
-
+if __name__ == "__main__":
     try:
-        while True:
-            print("status 2 listening", flush=True)
+        logging.info("Starting Kafka consumers")
+        app = Flask(__name__)
 
-            msg = consumer.poll(timeout=5.0)  # Poll messages with timeout
-            print("status 2 poll", flush=True)
-
-            if msg is None:
-                print("status 2 no", flush=True)
-                continue
-            if msg.error():
-                print(msg.error(),flush=True)
-                traceback.print_exc()
-                if msg.error().code() == KafkaException._PARTITION_EOF:
-                    print("EOF", flush=True)
-                    continue
-                else:
-                    traceback.print_exc()
-                    logging.error(f"Consumer error: {msg.error()}")
-                    continue
-            print(f"Message received {msg.value()}", flush=True)
-            data = json.loads(msg.value())
-            print(data, flush=True)
-            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
-            result = list(result)
-            if len(result) == 0:
-                print(f"No Movie In DB: {msg.key()}")
-                consumer.commit(message=msg)
-                continue
-            if len(result) != 0 and result[0][0] > 4:
-                print(f"No Movie In DB: {msg.key()}")
-                consumer.commit(message=msg)
-                continue
-
-
-            upload_result = UploadFile.upload_files(data["inputPath"], data["bucket"], data["outputPath"])
-            if upload_result:
-                instance.execute(set_upload_status, (5, result["resourceId"], result["type"]))
-
-            else:
-                logging.error("Uploading error!!!")
-
-            # 处理完后手动提交偏移量
-            consumer.commit(message=msg)
+        logging.info("Starting Flask application")
+        app.run(host="0.0.0.0", port=5000)
 
     except Exception as e:
+        logging.critical(f"Main process error: {e}")
         traceback.print_exc()
-        logging.error(f"Error: {e}")
-    finally:
-        consumer.close()
-
-
-
-
-def kafka_consumer():
-    '''
-        stage 1: encoding.
-    '''
-    logging.info("kafka consumer 1 start")
-
-    conf = {
-        'bootstrap.servers': KAFKA_BROKER,
-        'group.id': KAFKA_GROUP_ID,
-        'auto.offset.reset': 'earliest',
-        'enable.auto.commit': False  # 关闭自动提交
-    }
-
-    consumer = Consumer(conf)
-    consumer.subscribe(["fileUploadStage1"])
-
-    try:
-        while True:
-            print("status1 listening", flush=True)
-
-            msg = consumer.poll(timeout=5.0)  # Poll messages with timeout
-            if msg is None:
-                continue
-            if msg.error():
-                print(msg.error())
-                if msg.error().code() == KafkaException._PARTITION_EOF:
-                    continue
-                else:
-                    print(f"Consumer error: {msg.error()}")
-                    continue
-
-            logging.info(f"Message received {msg.value()}")
-
-            data = json.loads(msg.value())
-            if data is None:
-                print(f"Consumer error: {msg.key()}")
-                continue
-            print(data, flush=True)
-            # Check the status.
-            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
-            result = list(result)
-            if len(result) == 0:
-                print(f"No Movie In DB: {msg.key()}")
-                consumer.commit(message=msg)
-            if  result[0][0] > 3:
-                consumer.commit(message=msg)
-                continue
-
-
-            # Encoding process
-            encoding_result = movieEncodingUtil.encodeHls(data["inputPath"], data["outputPath"], data["inputSource"],
-                                                 data["outputSource"])
-            if encoding_result:
-                send_message(data["resourceId"] + "_" + data["type"],json.dumps({
-                    "resourceId": data["resourceId"],
-                    "inputPath": data["outputPath"],
-                    "type": data["type"],
-                    "bucket":"longvideos",
-                    "outputPath": "/" + data["type"] + "_" +data["resourceId"],
-                }))
-            else:
-                print("Encoding error!!!", flush=True)
-
-            # 处理完后手动提交偏移量
-            consumer.commit(message=msg)
-            instance.execute(set_upload_status, (4, data["resourceId"], data["type"]))
-
-    except Exception as e:
-        traceback.print_exc()
-        print(f"Error: {e}", flush=True)
-    # finally:
-    #     consumer.close()
-
-
-
-try:
-    logging.info("Starting Kafka consumers")
-
-    t1 = threading.Thread(target=kafka_consumer, daemon=True, name="KafkaConsumer1")
-    t2 = threading.Thread(target=upload_to_minio, daemon=True, name="MinioUploader")
-
-    t1.start()
-    t2.start()
-
-    # Import Flask here to avoid circular imports
-    from flask import Flask
-
-    app = Flask(__name__)
-
-    logging.info("Starting Flask application")
-    app.run(host="0.0.0.0", port=5000)
-
-except Exception as e:
-    logging.critical(f"Main process error: {e}")
-        # logging.critical(traceback.format_exc())
+        print("Main process error", flush=True)
+            # logging.critical(traceback.format_exc())
