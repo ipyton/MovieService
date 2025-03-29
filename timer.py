@@ -111,8 +111,8 @@ def upload_to_minio():
         except Exception as e:
             traceback.print_stack()
             logging.error(f"Error: {e}")
-        finally:
-            consumer.close()
+
+    consumer.close()
 
 
 

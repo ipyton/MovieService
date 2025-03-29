@@ -5,7 +5,7 @@ import time
 import traceback
 
 from confluent_kafka import KafkaException, Consumer, Producer
-from django.core.files.uploadedfile import UploadedFile
+
 from flask import Flask
 from flask import request
 from cassandra.cluster import Cluster
@@ -15,12 +15,10 @@ from bs4 import BeautifulSoup
 from flask_cors import CORS, cross_origin
 import sys
 import io
-import threading
-from utils import movieEncodingUtil, FileManipulator
+
 import re
 import MovieParser
 import os
-from confluent_kafka import Consumer, KafkaException
 import json
 
 
