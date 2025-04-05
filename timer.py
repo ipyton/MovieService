@@ -26,7 +26,7 @@ instance = cluster.connect()
 
 set_upload_status = instance.prepare("update files.file_upload_status set status_code = ? where resource_id = ? and resource_type = ?")
 check_upload_status = instance.prepare("select status_code from files.file_upload_status where resource_id = ? and resource_type = ?;")
-add_playlist = instance.prepare("insert into movie.playable (resource_id, type, quality, bucket, path) values(?, ?, ?, ?, ?)")
+add_playlist = instance.prepare("insert into movie.playable (resource_id, type, quality, bucket, path, season_id, episode) values(?, ?, ? ,?,?,?, ?)")
 
 producer = Producer({
     'bootstrap.servers': KAFKA_BROKER

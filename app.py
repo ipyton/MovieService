@@ -40,13 +40,14 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 instance = cluster.connect()
 
 insert_meta = instance.prepare("insert into movie.meta (resource_id,poster, score, introduction, movie_name, tags,"
-                               " actor_list, release_year, level, picture_list, maker_list, genre_list,type,language) "
-                               " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                               " actor_list, release_year, level, picture_list, maker_list, genre_list,type,language,total_season) "
+                               " values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 get_video_meta = instance.prepare("select * from movie.meta where resource_id = ? and type = ? and language = ?")
 getStared = instance.prepare("select * from movie.movieGallery where user_id = ? and resource_id=? and type = ?")
-get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource=?")
-get_playlist = instance.prepare("select * from movie.playable where resource_Id = ? and type = ?;")
+get_play_information = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and season_id = ? and episode = ? and resource=?")
+get_playlist = instance.prepare("select * from movie.playable where resource_Id = ? and type = ? and season_id = ? ;")
 
+insert_first_season_meta = instance.prepare("insert into movie.season_meta (resource_id, type, season_id, total_episode) values(?, ?, ?, ?);")
 KAFKA_BROKER = "localhost:9092"
 KAFKA_GROUP_ID = "flask-consumer-group"
 
@@ -124,7 +125,7 @@ def requestDispatcher(method, request_url, header=None):
 def get_meta_with_params(type, id, language):
     result = instance.execute(get_video_meta.bind((id, type, language)))
     result_list = list(result)
-    print(result_list)
+    print(result_list, flush=True)
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
         result = list(instance.execute(getStared.bind((request.args.get("userId"), type, id))))
@@ -227,11 +228,15 @@ def get_meta_with_params(type, id, language):
         return_result["genre_list"] = genresList
         return_result["type"] = type
         return_result["language"] = language
-
+        total_season = 1
+        if type == "movie":
+            total_season = 0
+        return_result["total_season"] = total_season
         # insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
         instance.execute(insert_meta, (id, poster, score, introduction, movie_name, tag, actressList,
-                                       release_year, level, picturesList, makersDict, genresList, type, language))
-
+                                       release_year, level, picturesList, makersDict, genresList, type, language, total_season))
+        if (type == "tv"):
+            instance.execute(insert_first_season_meta, (id, type, 1, 1))
         return json.dumps(return_result, ensure_ascii=False)
 
     return resolveMeta(result.text, handler)
@@ -327,15 +332,16 @@ def searchMovies():
 def get_play_information():
     resourceId = request.args.get("resourceId")
     type = request.args.get("type")
-    if resourceId is None or type is None:
+    season_id = request.args.get("seasonId")
+    if resourceId is None or type is None or season_id is None:
         print("get play information error", flush=True)
         return -1, "parameters are not sufficient"
     print(resourceId, flush=True)
     print(type, flush=True)
-    rs = instance.execute(get_playlist, (resourceId, type))
+    rs = instance.execute(get_playlist, (resourceId, type, season_id))
     result = []
     for (resource_id, type, quality, bucket, path) in rs:
-        result.append({"resource_id": resource_id, "type": type, "quality": quality,"bucket": bucket, "path": path})
+        result.append({"resource_id": resource_id, "type": type,"season_id":season_id ,"quality": quality,"bucket": bucket, "path": path})
 
     return json.dumps(result, ensure_ascii=False)
 

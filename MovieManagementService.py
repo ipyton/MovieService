@@ -51,13 +51,15 @@ auth_provider = PlainTextAuthProvider(username="cassandra", password="cassandra"
 cluster = Cluster(['127.0.0.1'], auth_provider=auth_provider, )
 instance = cluster.connect("movie")
 instance.default_consistency_level = ConsistencyLevel.LOCAL_QUORUM
-prepared = instance.prepare(query="insert into movie.resource (resource_id, type, resource, name, gid, status,quality) values (?,?,?,?,?,?,?)")
-prepared_query = instance.prepare("select * from movie.resource where resource_id = ? and type = ?")
-prepared_query_for_download = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and resource = ?")
-prepared_delete = instance.prepare("delete from movie.resource where resource_id = ? and type = ? and resource = ?")
-prepared_set_status = instance.prepare("update movie.resource set status = ? where resource_id  = ? and type = ? and resource=? and quality = ?")
-update_gid = instance.prepare("update movie.resource set gid = ? where resource_id = ? and type = ? and resource = ? and quality = ?")
-get_file_path = instance.prepare("select * from movie.playable where resource_id = ? and type = ? and quality = ?")
+prepared = instance.prepare(query="insert into movie.resource (resource_id, type, season_id, episode,resource, name, gid, status,quality) values (?,?,?, ?,?,?,?,?,?)")
+prepared_query = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and season_id = ? and episode = ?")
+prepared_query_for_download = instance.prepare("select * from movie.resource where resource_id = ? and type = ? and season_id = ? and episode = ? and resource = ?")
+prepared_delete = instance.prepare("delete from movie.resource where resource_id = ? and type = ? and season_id = ? and episode = ? and resource = ?")
+prepared_set_status = instance.prepare("update movie.resource set status = ? where resource_id  = ? and type = ? and season_id = ? and episode = ? and resource=? and quality = ?")
+update_gid = instance.prepare("update movie.resource set gid = ? where resource_id = ? and type = ? and season_id = ? and episode = ? and resource = ? and quality = ?")
+get_file_path = instance.prepare("select * from movie.playable where resource_id = ? and type = ? and season_id = ? and episode = ? and quality = ?")
+
+delete_playable = instance.prepare("delete  from movie.playable where resource_id = ? and type = ? and season_id = ? and episode = ? and quality = ? and episode = ?")
 
 
 
@@ -70,18 +72,20 @@ def get_sources():
     data = request.get_json()
     resource_id = data.get("resourceId")
     type = data.get("type")
+    season_id = data.get("seasonId")
+    episode = data.get("episode")
     print(resource_id is None)
     print(type is None,flush=True)
-    if resource_id is None or type is None:
+    if resource_id is None or type is None or season_id is None or episode is None:
         print("resourceId is null", flush=True)
         return "error", 400  # Return 400 explicitly if movieId is missing
-    result = instance.execute(prepared_query, [resource_id,type])
+    result = instance.execute(prepared_query, [resource_id,type,season_id,episode])
 
     result_list = []
     gids = []
     # for i in result:
     #     print(i, flush=True)
-    for (resource_id,type, resource, name, gid, status) in result:
+    for (resource_id, type, resource, name, gid, status) in result:
         print(resource_id, resource, name, gid, status, flush=True)
         if gid != None and len(gid):
             try:
@@ -282,7 +286,7 @@ def remove():
 
 @app.route("/movie/delete_file")
 @cross_origin()
-def delete_file(resourceId, type, quality):
+def delete_file(resourceId, type, quality,episode):
     if resourceId is None or type is None or quality is None:
         return -1, "error"
     path = instance.execute(get_file_path, (resourceId, type, quality))
@@ -292,6 +296,7 @@ def delete_file(resourceId, type, quality):
     if results[0].get("path") is None:
         return -1, "error"
     result = fileManipulator.delete_files_in_minio(results[0]["bucket"], results[0]["path"])
+    instance.execute(delete_playable,type,quality, episode)
     if result is None or result is False:
         return -1, "error"
     return 0,"success"

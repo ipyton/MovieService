@@ -15,8 +15,6 @@ minio_client = Minio(
 bucket_name = "longvideos"  # 你的桶名称
 directory_path = "./processed"  # 要上传的文件夹路径
 
-# 确保桶存在
-
 
 # 上传文件
 def upload_files(inputPath, bucket_name, outputPath):

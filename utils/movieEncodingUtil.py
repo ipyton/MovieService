@@ -2,7 +2,7 @@ import os
 import traceback
 
 import ffmpeg
-def encodeHls(input_path, output_path, input_source, output_sourcce):
+def encodeHls(input_path, output_path, input_source, output_source):
     try:
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -31,7 +31,7 @@ def encodeHls(input_path, output_path, input_source, output_sourcce):
                                                                    ).run()
                 return True
     except Exception as e:
-        traceback.print_exc()
+        traceback.print_stack()
         return False
 
     return True
