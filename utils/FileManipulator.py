@@ -38,21 +38,25 @@ def upload_files(inputPath, bucket_name, outputPath):
     except Exception as e:
         print(f"failed uploaded: {file_path}, error: {e}", flush=True)
         return False
+    return True
 
 def delete_files(inputPath):
     if os.path.exists(inputPath):
         shutil.rmtree(inputPath)
-        print(f"have deleted: {inputPath}")
+        print(f"have deleted: {inputPath}",flush=True)
     else:
-        print("the directory does not exist:", inputPath)
+        print("the directory does not exist:", inputPath,flush=True)
+
+def delete_file(inputPath):
+    os.remove(inputPath)
 
 def delete_files_in_minio(bucket, path):
     objects = minio_client.list_objects(bucket, prefix=path, recursive=True)
     for obj in objects:
         try:
             minio_client.remove_object(bucket, obj.object_name)
-            print(f"Deleted: {obj.object_name}")
+            print(f"Deleted: {obj.object_name}",flush=True)
         except Exception as e:
-            print(f"Failed to delete {obj.object_name}: {e}")
+            print(f"Failed to delete {obj.object_name}: {e}", flush=True)
             return False
     return True

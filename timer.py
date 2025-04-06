@@ -24,8 +24,8 @@ KAFKA_GROUP_ID = "flask-consumer-group"
 
 instance = cluster.connect()
 
-set_upload_status = instance.prepare("update files.file_upload_status set status_code = ? where resource_id = ? and resource_type = ?")
-check_upload_status = instance.prepare("select status_code from files.file_upload_status where resource_id = ? and resource_type = ?;")
+set_upload_status = instance.prepare("update files.file_upload_status set status_code = ? where resource_id = ? and resource_type = ? and season_id = ? and episode = ? and quality = ?")
+check_upload_status = instance.prepare("select status_code from files.file_upload_status where resource_id = ? and resource_type = ? and season_id = ? and episode = ? and quality = ?;")
 add_playlist = instance.prepare("insert into movie.playable (resource_id, type, quality, bucket, path, season_id, episode) values(?, ?, ? ,?,?,?, ?)")
 
 producer = Producer({
@@ -80,36 +80,41 @@ def upload_to_minio():
             print(f"Message received {msg.value()}", flush=True)
             data = json.loads(msg.value())
             print(data, flush=True)
-            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
+            #
+            result = instance.execute(check_upload_status, (data["resourceId"], data["type"],data["seasonId"],data["episode"],1))
             result = list(result)
+            print("00000000000000")
+            print(result, flush=True)
+
             if len(result) == 0:
-                print(f"No Movie In DB: {msg.key()}")
+                print(f"No Movie In DB: {msg.key()}", flush=True)
                 consumer.commit(message=msg)
                 continue
             if len(result) != 0 and result[0][0] > 4:
-                print(f"No Movie In DB: {msg.key()}")
+                print(f"No Movie In DB: {msg.key()}", flush=True)
                 consumer.commit(message=msg)
                 continue
+            # result = result[0]
 
-
+            print("prepare")
             upload_result = FileManipulator.upload_files(data["inputPath"], data["bucket"], data["outputPath"])
             if upload_result:
-                instance.execute(set_upload_status, (5, result["resourceId"], result["type"]))
+                instance.execute(set_upload_status, (5, data["resourceId"], data["type"],data["seasonId"], data["episode"], 1))
             else:
                 logging.error("Uploading error!!!")
-
+            print("deleting", flush=True)
             FileManipulator.delete_files(data["inputPath"])
             quality = data.get("quality")
             if data.get("quality") is None:
-                quality = 3
-            instance.execute(add_playlist, (data["resourceId"], data["type"], quality, data["bucket"], data["outputPath"]))
-
+                quality = 1
+            instance.execute(add_playlist, (data["resourceId"], data["type"], 1, data["bucket"], data["outputPath"], data["seasonId"], data["episode"]))
+            print("done", flush=True)
             # 处理完后手动提交偏移量
             consumer.commit(message=msg)
 
 
         except Exception as e:
-            traceback.print_stack()
+            traceback.format_exc()
             logging.error(f"Error: {e}")
 
     consumer.close()
@@ -154,7 +159,7 @@ def kafka_consumer():
                 continue
             print(data, flush=True)
             # Check the status.
-            result = instance.execute(check_upload_status, (data["resourceId"], data["type"]))
+            result = instance.execute(check_upload_status, (data["resourceId"], data["type"],data["seasonId"],data["episode"],1))
             result = list(result)
             if len(result) == 0:
                 print(f"No Movie In DB: {msg.key()}")
@@ -173,14 +178,17 @@ def kafka_consumer():
                     "inputPath": data["outputPath"],
                     "type": data["type"],
                     "bucket":"longvideos",
-                    "outputPath": "/" + data["type"] + "_" +data["resourceId"],
+                    "outputPath": "/" + data["type"] + "_" +data["resourceId"] + "_" + str(data["seasonId"]) + "_" + str(data["episode"]),
+                    "seasonId": data["seasonId"],
+                    "episode": data["episode"],
+                    "quality": 1,
                 }))
             else:
                 print("Encoding error!!!", flush=True)
-
+            print("done", flush=True)
             # 处理完后手动提交偏移量
-            instance.execute(set_upload_status, (4, data["resourceId"], data["type"]))
-            FileManipulator.delete_files(data["inputPath"])
+            instance.execute(set_upload_status, (4, data["resourceId"], data["type"],data["seasonId"], data["episode"], 1))
+            FileManipulator.delete_file(data["inputPath"])
         except Exception as e:
             traceback.print_stack()
             print(f"Error: {e}", flush=True)
