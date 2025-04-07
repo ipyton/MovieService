@@ -122,19 +122,19 @@ def requestDispatcher(method, request_url, header=None):
 
     return result
 
-def get_meta_with_params(type, id, language):
-    result = instance.execute(get_video_meta.bind((id, type, language)))
+def get_meta_with_params(req_type, req_id, language):
+    result = instance.execute(get_video_meta.bind((req_id, req_type, language)))
     result_list = list(result)
     print(result_list, flush=True)
     if len(result_list) != 0:
         parsed = MovieParser.parseMovie(result_list[0])
-        result = list(instance.execute(getStared.bind((request.args.get("userId"), type, id))))
+        result = list(instance.execute(getStared.bind((request.args.get("userId"), req_type, req_id))))
         if len(result) != 0:
             parsed["stared"] = True
         return json.dumps(parsed, ensure_ascii=False)
     print("visit outside", flush=True)
-    result = requestDispatcher("get", get_detail_url(type, id, language))
-    print(get_detail_url(type, id, language),flush=True)
+    result = requestDispatcher("get", get_detail_url(req_type, req_id, language))
+    print(get_detail_url(req_type, req_id, language), flush=True)
     if result is None:
         return json.dumps([], ensure_ascii=False)
 
@@ -226,17 +226,17 @@ def get_meta_with_params(type, id, language):
         return_result["pictureList"] = picturesList
         return_result["makerList"] = makersDict
         return_result["genre_list"] = genresList
-        return_result["type"] = type
+        return_result["type"] = req_type
         return_result["language"] = language
         total_season = 1
-        if type == "movie":
+        if req_type == "movie":
             total_season = 0
         return_result["total_season"] = total_season
         # insert_meta = instance.prepare("insert into movie.meta (movieId,poster, score, introduction, movie_name, tags, actress_list, release_year, level, picture_list, maker_list, genre_list)  values(?,?,?,?,?,?,?,?,?,?,?,?)")
-        instance.execute(insert_meta, (id, poster, score, introduction, movie_name, tag, actressList,
-                                       release_year, level, picturesList, makersDict, genresList, type, language, total_season))
-        if (type == "tv"):
-            instance.execute(insert_first_season_meta, (id, type, 1, 1))
+        instance.execute(insert_meta, (req_id, poster, score, introduction, movie_name, tag, actressList,
+                                       release_year, level, picturesList, makersDict, genresList, req_type, language, total_season))
+        if req_type == "tv":
+            instance.execute(insert_first_season_meta, (req_id, req_type, 1, 1))
         return json.dumps(return_result, ensure_ascii=False)
 
     return resolveMeta(result.text, handler)
@@ -250,15 +250,15 @@ def get_meta():  # get name of a movie.
     print(language, flush=True)
     if language is None:
         language = "en-US"
-    type = request.args.get("type")
-    id = request.args.get("id")
-    if type is None or id is None:
+    req_type = request.args.get("type")
+    req_id = request.args.get("id")
+    if req_type is None or req_id is None:
         print("get meta error", flush=True)
         return "parameters are not sufficient"
-
-    result = get_meta_with_params(type, id, language)
     if language != "en-US":
-        get_meta_with_params(type, id, "en-US")
+        language = "en-US"
+    result = get_meta_with_params(req_type, req_id, language)
+
     return result
 
 

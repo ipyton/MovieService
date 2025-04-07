@@ -14,6 +14,7 @@ def parseMovie(movie):
     result['release_year']=movie.release_year
     result['score']=movie.score
     result['total_season']=movie.total_season
+    result['type']=movie.type
 
     if movie.tags is not None:
         result['tags']=movie.tags
