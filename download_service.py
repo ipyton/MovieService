@@ -1,8 +1,7 @@
 #encoding=utf-8
 import json
-import sys
-import codecs
-from flask import Flask
+
+from flask import Flask, Blueprint
 from flask import request
 from cassandra.cluster import Cluster, ExecutionProfile, EXEC_PROFILE_DEFAULT, ConsistencyLevel
 import aria2p
@@ -14,7 +13,6 @@ import concurrent.futures
 import ffmpeg
 from minio import Minio
 from minio.error import S3Error
-import threading
 import os
 import subprocess
 import utils.FileManipulator as fileManipulator
@@ -25,16 +23,17 @@ minio_client = Minio(
     secret_key="admin123",
     secure=False
 )
-bucket_name = "longvideos"  # 替换为你的桶名称
-directory_path = "./processed"  # 替换为你的文件夹路径
-app = Flask(__name__)
+bucket_name = "longvideos"
+directory_path = "./processed"
+
+download_bp = Blueprint('download', __name__, url_prefix='/')
+
 # CORS(app,  resources={
 #    r"/*": {
 #        "origins": ["http://example.com", "http://www.example.com"],
 #        "methods": ["GET", "POST"],
 #        "headers": ["Content-Type", "Authorization"]
 #    }})
-CORS(app)
 aria = aria2p.API(
     aria2p.Client(
         host="http://localhost",
@@ -66,7 +65,7 @@ delete_playable = instance.prepare("delete  from movie.playable where resource_i
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
 support_format = []
-@app.route('/movie/get_sources', methods=['POST'])
+@download_bp.route('/movie/get_sources', methods=['POST'])
 @cross_origin()
 def get_sources():
     data = request.get_json()
@@ -99,7 +98,7 @@ def get_sources():
     print(result_list, flush=True)
     return json.dumps(result_list, ensure_ascii=False)
 
-@app.route('/movie/add_source', methods=['POST'])
+@download_bp.route('/movie/add_source', methods=['POST'])
 @cross_origin()
 def add_source():
     json = request.get_json()
@@ -116,7 +115,7 @@ def add_source():
     return "success"
 
 
-@app.route('/movie/remove_source', methods=['POST'])
+@download_bp.route('/movie/remove_source', methods=['POST'])
 @cross_origin()
 def remove_source():
     json = request.get_json()
@@ -131,7 +130,7 @@ def remove_source():
 
 
 
-@app.route('/movie/get_files', methods=['POST'])
+@download_bp.route('/movie/get_files', methods=['POST'])
 @cross_origin()
 def get_files():
     gid = request.form["gid"]
@@ -161,7 +160,7 @@ def get_files():
 
 
 
-@app.route('/movie/select', methods=['POST'])
+@download_bp.route('/movie/select', methods=['POST'])
 @cross_origin()
 def select_download():
     gid = request.form["gid"]
@@ -178,7 +177,7 @@ def select_download():
     instance.execute(prepared_set_status.bind(("downloading",movieId.strip(), resource.strip())))
     return "success"
 
-@app.route('/movie/start', methods=['POST'])
+@download_bp.route('/movie/start', methods=['POST'])
 @cross_origin()
 def download():
     movieId = request.form["movieId"]
@@ -204,7 +203,7 @@ def download():
         return download.gid
 
 
-@app.route('/movie/pause', methods=['POST'])
+@download_bp.route('/movie/pause', methods=['POST'])
 @cross_origin()
 def pause():
     gid = request.form["gid"]
@@ -212,7 +211,7 @@ def pause():
     aria.pause(download)
 
 
-@app.route("/movie/batch_pause", methods=['POST'])
+@download_bp.route("/movie/batch_pause", methods=['POST'])
 @cross_origin()
 def batch_pause():
     movies = request.get_json()["downloads"]
@@ -226,7 +225,7 @@ def batch_pause():
     return "success"
 
 
-@app.route('/movie/batch_resume', methods=['POST'])
+@download_bp.route('/movie/batch_resume', methods=['POST'])
 @cross_origin()
 def batch_resume():
     movies = request.get_json()["downloads"]
@@ -240,7 +239,7 @@ def batch_resume():
 
 
 
-@app.route('/movie/resume', methods=['POST'])
+@download_bp.route('/movie/resume', methods=['POST'])
 @cross_origin()
 def resume():
     gid = request.form["gid"]
@@ -249,7 +248,7 @@ def resume():
     return "success"
 
 
-@app.route('/movie/batch_stop', methods=['POST'])
+@download_bp.route('/movie/batch_stop', methods=['POST'])
 @cross_origin()
 def batch_stop():
     movies = request.get_json()["downloads"]
@@ -261,7 +260,7 @@ def batch_stop():
     aria.resume(downloads)
 
 
-@app.route('/movie/batch_remove', methods=['POST'])
+@download_bp.route('/movie/batch_remove', methods=['POST'])
 @cross_origin()
 def batch_remove():
     movies = request.get_json()["downloads"]
@@ -275,7 +274,7 @@ def batch_remove():
     return "success"
 
 
-@app.route('/movie/remove', methods=['POST'])
+@download_bp.route('/movie/remove', methods=['POST'])
 @cross_origin()
 def remove():
     movieId = request.form["movieId"]
@@ -284,7 +283,7 @@ def remove():
     download = aria.get_download(gid)
     aria.remove([download])
 
-@app.route("/movie/delete_file")
+@download_bp.route("/movie/delete_file")
 @cross_origin()
 def delete_file(resourceId, type, quality,episode):
     if resourceId is None or type is None or quality is None:
@@ -304,7 +303,7 @@ def delete_file(resourceId, type, quality,episode):
 
 
 
-@app.route('/movie/get_download_status', methods=['GET'])
+@download_bp.route('/movie/get_download_status', methods=['GET'])
 @cross_origin()
 def get_download_status():
     downloads = aria.get_downloads()
@@ -425,7 +424,6 @@ def encode(download):
 scheduler = sched.scheduler(time.time, time.sleep)
 
 def check():
-
     downloads = aria.get_downloads()
     for download in downloads:
         if download.name in handling_set:
@@ -455,7 +453,3 @@ def start_scheduler():
 
 
 
-if __name__ == '__main__':
-    # thread = threading.Thread(target=start_scheduler)
-    # thread.start()
-    app.run(host="0.0.0.0", port=5001)
