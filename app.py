@@ -39,7 +39,7 @@ if __name__ == "__main__":
         app = Flask(__name__)
 
         logging.info("Starting Flask application")
-        app.run(host="0.0.0.0", port=5000)
+        app.run(host="0.0.0.0", port=8081)
 
     except Exception as e:
         logging.critical(f"Main process error: {e}")
