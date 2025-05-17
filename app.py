@@ -28,9 +28,10 @@ app.register_blueprint(download_bp)
 app.register_blueprint(meta_bp)
 
 
-@app.before_request
-def before_request():
+@app.before_first_request
+def startup():
     timer.main()
+
 
 
 if __name__ == "__main__":
