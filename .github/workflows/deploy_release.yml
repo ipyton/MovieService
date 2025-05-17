@@ -20,7 +20,7 @@ jobs:
           username: opc
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: .
-          target: /home/opc/python_app
+          target: /home/opc/movie_meta
 
       - name: Run deployment steps on server
         uses: appleboy/ssh-action@master
