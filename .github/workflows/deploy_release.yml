@@ -35,7 +35,7 @@ jobs:
             cd ~/movie_meta
 
             # 使用虚拟环境（可选，但推荐）
-            python3 -m venv venv
+            python3.9 -m venv venv
             source venv/bin/activate
 
             # 安装依赖
