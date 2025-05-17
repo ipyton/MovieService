@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -31,22 +31,18 @@ jobs:
           script: |
             cd ~/movie_meta
 
-            # 创建虚拟环境
+            # 使用虚拟环境（可选，但推荐）
             python3.9 -m venv venv
+            source venv/bin/activate
 
             # 安装依赖
-            ./venv/bin/pip install --upgrade pip
-            ./venv/bin/pip install -r requirements.txt
+            pip install --upgrade pip
+            pip install -r requirements.txt
 
-            # 杀死旧进程
-            pkill -f "venv/bin/python app.py" || true
+            # 杀死旧进程（如果有）
+            kill $(cat app.pid) || true
 
-            # 后台启动，并确保立即返回
-            nohup ./venv/bin/python app.py > app.log 2>&1 < /dev/null &
+            # 启动应用
+            nohup venv/bin/python app.py > app.log 2>&1 & echo $! > app.pid
 
-            # 打印前几行日志进行排查（可选）
-            sleep 3
-            tail -n 10 app.log || true
-
-            echo "✅ Deployment script finished."
-
+            echo "✅ Python app deployed and started."
