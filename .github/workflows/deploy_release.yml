@@ -43,6 +43,6 @@ jobs:
             pkill -f app.py || true
 
             # 启动应用
-            nohup venv/bin/python app.py > app.log 2>&1 &
+            nohup venv/bin/python app.py > app.log 2> app.err.log &
 
             echo "✅ Python app deployed and started."
