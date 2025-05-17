@@ -19,11 +19,8 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: opc
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: |
-            **/*
-            !.git/**
-            !.github/**
-          target: /home/opc/python_app
+          source: .
+          target: /home/opc/movie_meta
 
       - name: Run deployment steps on server
         uses: appleboy/ssh-action@master
