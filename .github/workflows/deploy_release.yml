@@ -19,10 +19,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: opc
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: |
-            **/*
-            !.git/**
-            !.github/**
+          source: .
           target: /home/opc/python_app
 
       - name: Run deployment steps on server
