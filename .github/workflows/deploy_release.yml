@@ -31,18 +31,22 @@ jobs:
           script: |
             cd ~/movie_meta
 
-            # 使用虚拟环境（可选，但推荐）
+            # 创建虚拟环境
             python3.9 -m venv venv
-            source venv/bin/activate
 
             # 安装依赖
-            pip install --upgrade pip
-            pip install -r requirements.txt
+            ./venv/bin/pip install --upgrade pip
+            ./venv/bin/pip install -r requirements.txt
 
-            # 杀死旧进程（如果有）
-            pkill -f app.py || true
+            # 杀死旧进程
+            pkill -f "venv/bin/python app.py" || true
 
-            # 启动应用
-            nohup venv/bin/python app.py > app.log 2> app.err.log &
+            # 后台启动，并确保立即返回
+            nohup ./venv/bin/python app.py > app.log 2>&1 < /dev/null &
 
-            echo "✅ Python app deployed and started."
+            # 打印前几行日志进行排查（可选）
+            sleep 3
+            tail -n 10 app.log || true
+
+            echo "✅ Deployment script finished."
+
