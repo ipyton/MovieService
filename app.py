@@ -4,7 +4,8 @@ import logging
 import time
 import traceback
 
-from flask import Flask
+import requests
+from flask import Flask, request, jsonify
 
 from flask_cors import CORS, cross_origin
 import sys
@@ -28,18 +29,42 @@ app.register_blueprint(download_bp)
 app.register_blueprint(meta_bp)
 
 
-@app.before_first_request
-def startup():
-    timer.main()
 
+@app.before_request
+def authenticate():
+    # 跳过 OPTIONS 请求，以便前端通过 CORS 预检
+    if request.method == 'OPTIONS':
+        return  # 不拦截预检请求，否则浏览器会报 401
+
+    token = request.headers.get('token')
+    if not token:
+        return jsonify({"error": "Unauthorized: No token provided"}), 401
+
+    try:
+        response = requests.post(
+            "http://localhost:8080/auth/hasPermission",
+            headers={"token": token},
+            json={"path": request.path}  # 修复 body 参数
+        )
+        if response.status_code != 200:
+            return jsonify({"error": "Auth server error"}), 500
+
+        res_json = response.json()  # 修复 .get_json()
+        print(res_json, flush=True)
+
+        if res_json.get("code") == 0:
+            return  # 放行
+        else:
+            return jsonify({"error": "Unauthorized: Invalid token"}), 401
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 
 if __name__ == "__main__":
     try:
-        logging.info("Starting Kafka consumers")
-        app = Flask(__name__)
-
         logging.info("Starting Flask application")
+        timer.main()
         app.run(host="0.0.0.0", port=8081)
 
 
