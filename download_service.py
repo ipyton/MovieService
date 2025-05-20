@@ -65,6 +65,13 @@ delete_playable = instance.prepare("delete  from movie.playable where resource_i
 # add_source.consistency_level = ConsistencyLevel.LOCAL_ONE
 
 support_format = []
+
+
+@download_bp.route("/hello")
+@cross_origin()
+def hello():
+    return "Hello, World!", 200
+
 @download_bp.route('/movie/get_sources', methods=['POST'])
 @cross_origin()
 def get_sources():

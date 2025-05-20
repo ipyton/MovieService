@@ -53,7 +53,7 @@ def authenticate():
         print(res_json, flush=True)
 
         if res_json.get("code") == 0:
-            return  # 放行
+            return
         else:
             return jsonify({"error": "Unauthorized: Invalid token"}), 401
 

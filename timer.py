@@ -197,10 +197,10 @@ def main():
     t1 = threading.Thread(target=kafka_consumer, daemon=True, name="KafkaConsumer1")
     t2 = threading.Thread(target=upload_to_minio, daemon=True, name="MinioUploader")
 
+    print("start t1")
+    print("start t2")
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
 
 if __name__ =="__main__":
     logging.info("Starting Kafka consumers")
