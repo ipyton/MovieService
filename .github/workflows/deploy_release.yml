@@ -31,18 +31,20 @@ jobs:
           script: |
             cd ~/movie_meta
 
-            # 使用虚拟环境（可选，但推荐）
+            echo "Creating virtual environment (if not exists)..."
             python3.9 -m venv venv
-            source venv/bin/activate
 
-            # 安装依赖
-            pip install --upgrade pip
-            pip install -r requirements.txt
+            echo "Installing dependencies with venv pip..."
+            ./venv/bin/pip install --upgrade pip
+            ./venv/bin/pip install -r requirements.txt
 
-            # 杀死旧进程（如果有）
-            kill $(cat app.pid) || true
+            echo "Stopping existing app if running..."
+            if [ -f app.pid ]; then
+              kill $(cat app.pid) || true
+              rm app.pid
+            fi
 
-            # 启动应用
-            nohup venv/bin/python app.py > app.log 2>&1 & echo $! > app.pid
+            echo "Starting app with venv Python..."
+            nohup ./venv/bin/python app.py > app.log 2>&1 & echo $! > app.pid
 
-            echo "✅ Python app deployed and started."
+            echo "Python app deployed and started. Logs: $(pwd)/app.log"
