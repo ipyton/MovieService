@@ -5,4 +5,4 @@ confluent-kafka~=2.8.2
 flask~=3.1.0
 beautifulsoup4~=4.13.3
 flask-cors~=5.0.1
-aria2p~=0.12.1
+cassandra-driver~=3.29.1
