@@ -23,8 +23,6 @@ os.environ['FLASK_DEBUG'] = '1'
 
 
 app = Flask(__name__)
-cors = CORS(app, resources={r"*": {"origins": "*","methods": "*", "headers":"*"}})
-app.config['CORS_HEADERS'] = 'Content-Type'
 app.register_blueprint(download_bp)
 app.register_blueprint(meta_bp)
 

@@ -41,7 +41,7 @@ def delivery_report(err, msg):
 
 
 def send_message(key, value):
-    producer.produce("fileUploadStage2", key = key, value = value, callback = delivery_report)
+    producer.produce(" 2", key = key, value = value, callback = delivery_report)
     producer.flush()  # 确保消息发送
 
 
@@ -83,8 +83,6 @@ def upload_to_minio():
             #
             result = instance.execute(check_upload_status, (data["resourceId"], data["type"],data["seasonId"],data["episode"],1))
             result = list(result)
-            print("00000000000000")
-            print(result, flush=True)
 
             if len(result) == 0:
                 print(f"No Movie In DB: {msg.key()}", flush=True)
@@ -95,8 +93,6 @@ def upload_to_minio():
                 consumer.commit(message=msg)
                 continue
             # result = result[0]
-
-            print("prepare")
             upload_result = FileManipulator.upload_files(data["inputPath"], data["bucket"], data["outputPath"])
             if upload_result:
                 instance.execute(set_upload_status, (5, data["resourceId"], data["type"],data["seasonId"], data["episode"], 1))
