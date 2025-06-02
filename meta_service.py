@@ -7,7 +7,6 @@ from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
 import requests
 from bs4 import BeautifulSoup
-from flask_cors import CORS, cross_origin
 
 
 import re
@@ -229,7 +228,6 @@ def get_meta_with_params(req_type, req_id, language):
 
 
 @meta_bp.route('/movie/get_meta', methods=['GET'])
-@cross_origin()
 def get_meta():  # get name of a movie.
     # print(get_detail_url(request.args.get("detail_address")))
     language = request.args.get("Accept-Language")
@@ -249,7 +247,6 @@ def get_meta():  # get name of a movie.
 
 
 @meta_bp.route("/movie/search", methods=['GET'])
-@cross_origin()
 def searchMovies():
     keyword = request.args.get("keyword")
     page_number = request.args.get("page_number")
@@ -314,7 +311,6 @@ def searchMovies():
     return resolveMeta(result.text, handler)
 
 @meta_bp.route("/movie/get_play_information", methods=["GET"])
-@cross_origin()
 def get_play_information():
     resourceId = request.args.get("resourceId")
     type = request.args.get("type")

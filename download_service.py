@@ -5,7 +5,6 @@ from flask import Flask, Blueprint
 from flask import request
 from cassandra.cluster import Cluster, ExecutionProfile, EXEC_PROFILE_DEFAULT, ConsistencyLevel
 import aria2p
-from flask_cors import CORS, cross_origin
 from cassandra.auth import PlainTextAuthProvider
 import sched
 import time
@@ -68,12 +67,10 @@ support_format = []
 
 
 @download_bp.route("/hello")
-@cross_origin()
 def hello():
     return "Hello, World!", 200
 
 @download_bp.route('/movie/get_sources', methods=['POST'])
-@cross_origin()
 def get_sources():
     data = request.get_json()
     resource_id = data.get("resourceId")
@@ -106,7 +103,6 @@ def get_sources():
     return json.dumps(result_list, ensure_ascii=False)
 
 @download_bp.route('/movie/add_source', methods=['POST'])
-@cross_origin()
 def add_source():
     json = request.get_json()
     resource_id = json.get("resourceId")
@@ -123,7 +119,6 @@ def add_source():
 
 
 @download_bp.route('/movie/remove_source', methods=['POST'])
-@cross_origin()
 def remove_source():
     json = request.get_json()
 
@@ -138,7 +133,6 @@ def remove_source():
 
 
 @download_bp.route('/movie/get_files', methods=['POST'])
-@cross_origin()
 def get_files():
     gid = request.form["gid"]
     movieId = request.form["movieId"]
@@ -168,7 +162,6 @@ def get_files():
 
 
 @download_bp.route('/movie/select', methods=['POST'])
-@cross_origin()
 def select_download():
     gid = request.form["gid"]
     select = request.form["place"]
@@ -185,7 +178,6 @@ def select_download():
     return "success"
 
 @download_bp.route('/movie/start', methods=['POST'])
-@cross_origin()
 def download():
     movieId = request.form["movieId"]
     source = request.form["source"]
@@ -211,7 +203,6 @@ def download():
 
 
 @download_bp.route('/movie/pause', methods=['POST'])
-@cross_origin()
 def pause():
     gid = request.form["gid"]
     download = aria.get_download(gid)
@@ -219,7 +210,6 @@ def pause():
 
 
 @download_bp.route("/movie/batch_pause", methods=['POST'])
-@cross_origin()
 def batch_pause():
     movies = request.get_json()["downloads"]
     gids = []
@@ -233,7 +223,6 @@ def batch_pause():
 
 
 @download_bp.route('/movie/batch_resume', methods=['POST'])
-@cross_origin()
 def batch_resume():
     movies = request.get_json()["downloads"]
     gids = []
@@ -247,7 +236,6 @@ def batch_resume():
 
 
 @download_bp.route('/movie/resume', methods=['POST'])
-@cross_origin()
 def resume():
     gid = request.form["gid"]
     download = aria.get_downloads(gid)
@@ -256,7 +244,6 @@ def resume():
 
 
 @download_bp.route('/movie/batch_stop', methods=['POST'])
-@cross_origin()
 def batch_stop():
     movies = request.get_json()["downloads"]
     gids = []
@@ -268,7 +255,6 @@ def batch_stop():
 
 
 @download_bp.route('/movie/batch_remove', methods=['POST'])
-@cross_origin()
 def batch_remove():
     movies = request.get_json()["downloads"]
     print(movies)
@@ -282,7 +268,6 @@ def batch_remove():
 
 
 @download_bp.route('/movie/remove', methods=['POST'])
-@cross_origin()
 def remove():
     movieId = request.form["movieId"]
     gid = request.form["gid"]
@@ -291,7 +276,6 @@ def remove():
     aria.remove([download])
 
 @download_bp.route("/movie/delete_file")
-@cross_origin()
 def delete_file(resourceId, type, quality,episode):
     if resourceId is None or type is None or quality is None:
         return -1, "error"
@@ -311,7 +295,6 @@ def delete_file(resourceId, type, quality,episode):
 
 
 @download_bp.route('/movie/get_download_status', methods=['GET'])
-@cross_origin()
 def get_download_status():
     downloads = aria.get_downloads()
     result_list = []
