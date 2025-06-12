@@ -24,11 +24,12 @@ os.environ['FLASK_ENV'] = 'development'
 os.environ['FLASK_DEBUG'] = '1'
 
 app = Flask(__name__)
+metrics = PrometheusMetrics(app)  # 自动暴露 /metrics
+
 
 app.register_blueprint(download_bp)
 app.register_blueprint(meta_bp)
 
-metrics = PrometheusMetrics(app)  # 自动暴露 /metrics
 
 # Create a logger for the main application
 logger = logging.getLogger(__name__)
