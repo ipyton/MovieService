@@ -1,7 +1,7 @@
 from flask import Blueprint
 import logging
 import time
-from confluent_kafka import KafkaException, Consumer, Producer
+from confluent_kafka import Producer
 
 from flask import request
 from cassandra.cluster import Cluster

@@ -12,7 +12,7 @@ from cassandra.cluster import Cluster
 
 from utils import movieEncodingUtil, FileManipulator
 
-from confluent_kafka import Consumer, KafkaException, Producer
+from confluent_kafka import Consumer, KafkaError, Producer
 import json
 
 
@@ -70,7 +70,7 @@ def upload_to_minio():
             if msg.error():
                 print(msg.error(),flush=True)
                 traceback.print_exc()
-                if msg.error().code() == KafkaException._PARTITION_EOF:
+                if msg.error().code() == KafkaError._PARTITION_EOF:
                     print("EOF", flush=True)
                     continue
                 else:
@@ -141,7 +141,7 @@ def kafka_consumer():
                 continue
             if msg.error():
                 print(msg.error())
-                if msg.error().code() == KafkaException._PARTITION_EOF:
+                if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
                 else:
                     print(f"Consumer error: {msg.error()}")
