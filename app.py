@@ -34,6 +34,9 @@ metrics = PrometheusMetrics(app)  # 自动暴露 /metrics
 logger = logging.getLogger(__name__)
 
 
+
+
+
 class SpringStyleFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
         dt = datetime.datetime.fromtimestamp(record.created)
@@ -105,6 +108,16 @@ def log_request_info():
 def log_response_info(response):
     """Log outgoing response information"""
     logger.info(f"Response: {response.status_code} for {request.method} {request.path}")
+
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'rule': rule.rule
+        })
+
+    print(routes)
     if response.status_code >= 400:
         logger.warning(f"Error response {response.status_code}: {response.get_data(as_text=True)[:200]}...")
     return response
