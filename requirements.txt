@@ -7,3 +7,4 @@ beautifulsoup4~=4.13.3
 flask-cors~=5.0.1
 cassandra-driver~=3.29.1
 aria2p
+prometheus_flask_exporter

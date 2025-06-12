@@ -17,14 +17,18 @@ import os
 import timer
 from download_service import download_bp
 from meta_service import meta_bp
+from prometheus_flask_exporter import PrometheusMetrics
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 os.environ['FLASK_ENV'] = 'development'
 os.environ['FLASK_DEBUG'] = '1'
 
 app = Flask(__name__)
+
 app.register_blueprint(download_bp)
 app.register_blueprint(meta_bp)
+
+metrics = PrometheusMetrics(app)  # 自动暴露 /metrics
 
 # Create a logger for the main application
 logger = logging.getLogger(__name__)
