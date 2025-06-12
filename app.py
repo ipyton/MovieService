@@ -116,8 +116,8 @@ def log_response_info(response):
             'methods': list(rule.methods),
             'rule': rule.rule
         })
+    logger.info(routes)
 
-    print(routes)
     if response.status_code >= 400:
         logger.warning(f"Error response {response.status_code}: {response.get_data(as_text=True)[:200]}...")
     return response
