@@ -12,7 +12,7 @@ from cassandra.cluster import Cluster
 
 from utils import movieEncodingUtil, FileManipulator
 
-from confluent_kafka import Consumer, KafkaException, Producer
+from confluent_kafka import Consumer, KafkaError, Producer
 import json
 
 
@@ -41,7 +41,7 @@ def delivery_report(err, msg):
 
 
 def send_message(key, value):
-    producer.produce("fileUploadStage2", key = key, value = value, callback = delivery_report)
+    producer.produce(" 2", key = key, value = value, callback = delivery_report)
     producer.flush()  # 确保消息发送
 
 
@@ -70,7 +70,7 @@ def upload_to_minio():
             if msg.error():
                 print(msg.error(),flush=True)
                 traceback.print_exc()
-                if msg.error().code() == KafkaException._PARTITION_EOF:
+                if msg.error().code() == KafkaError._PARTITION_EOF:
                     print("EOF", flush=True)
                     continue
                 else:
@@ -83,8 +83,6 @@ def upload_to_minio():
             #
             result = instance.execute(check_upload_status, (data["resourceId"], data["type"],data["seasonId"],data["episode"],1))
             result = list(result)
-            print("00000000000000")
-            print(result, flush=True)
 
             if len(result) == 0:
                 print(f"No Movie In DB: {msg.key()}", flush=True)
@@ -95,8 +93,6 @@ def upload_to_minio():
                 consumer.commit(message=msg)
                 continue
             # result = result[0]
-
-            print("prepare")
             upload_result = FileManipulator.upload_files(data["inputPath"], data["bucket"], data["outputPath"])
             if upload_result:
                 instance.execute(set_upload_status, (5, data["resourceId"], data["type"],data["seasonId"], data["episode"], 1))
@@ -145,7 +141,7 @@ def kafka_consumer():
                 continue
             if msg.error():
                 print(msg.error())
-                if msg.error().code() == KafkaException._PARTITION_EOF:
+                if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
                 else:
                     print(f"Consumer error: {msg.error()}")
@@ -197,10 +193,10 @@ def main():
     t1 = threading.Thread(target=kafka_consumer, daemon=True, name="KafkaConsumer1")
     t2 = threading.Thread(target=upload_to_minio, daemon=True, name="MinioUploader")
 
+    print("start t1")
+    print("start t2")
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
 
 if __name__ =="__main__":
     logging.info("Starting Kafka consumers")
