@@ -6,13 +6,15 @@ import traceback
 import datetime
 import threading
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 from flask_cors import CORS, cross_origin
 import sys
 import io
 
 import os
+
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 import timer
 from download_service import download_bp
@@ -205,6 +207,13 @@ def handle_unexpected_error(error):
     logger.critical(f"Unexpected error: {str(error)}")
     logger.critical(traceback.format_exc())
     return jsonify({"error": "An unexpected error occurred"}), 500
+
+
+# 暴露 metrics 接口
+@app.route('/metrics')
+def metrics():
+    # 返回所有指标数据
+    return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 
 # Health check endpoint
