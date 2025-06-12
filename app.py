@@ -117,7 +117,8 @@ def authenticate():
     if request.method == 'OPTIONS':
         logger.debug("Skipping authentication for OPTIONS request")
         return  # 不拦截预检请求，否则浏览器会报 401
-
+    if request.url == "/metrics":
+        return
     logger.info(f"Authenticating request to {request.path}")
 
     token = request.headers.get('token')
