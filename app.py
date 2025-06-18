@@ -143,10 +143,10 @@ def authenticate():
         return jsonify({"error": "Unauthorized: No token provided"}), 401
 
     try:
-        logger.debug(f"Validating token for path: {request.path}")
+        logger.info(f"Validating token for path: {request.path}")
 
         auth_request_data = {"path": request.path}
-        logger.debug(f"Sending auth request: {auth_request_data}")
+        logger.info(f"Sending auth request: {auth_request_data}")
 
         response = requests.post(
             "http://localhost:8080/auth/hasPermission",
