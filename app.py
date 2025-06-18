@@ -147,7 +147,7 @@ def authenticate():
 
         auth_request_data = {"path": request.path}
         logger.info(f"Sending auth request: {auth_request_data}")
-
+        logger.info(f"Validating token for token: {token}")
         response = requests.post(
             "http://localhost:8080/auth/hasPermission",
             headers={"token": token},
