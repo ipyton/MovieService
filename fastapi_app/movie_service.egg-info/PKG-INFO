@@ -1,0 +1,16 @@
+Metadata-Version: 2.1
+Name: movie-service
+Version: 0.1.0
+Requires-Dist: fastapi>=0.95.0
+Requires-Dist: uvicorn>=0.22.0
+Requires-Dist: pydantic>=1.10.7
+Requires-Dist: minio>=7.2.15
+Requires-Dist: ffmpeg-python>=0.2.0
+Requires-Dist: requests>=2.32.3
+Requires-Dist: confluent-kafka>=2.8.2
+Requires-Dist: beautifulsoup4>=4.13.3
+Requires-Dist: cassandra-driver>=3.29.1
+Requires-Dist: aria2p>=0.11.3
+Requires-Dist: prometheus-client>=0.17.1
+Requires-Dist: prometheus-fastapi-instrumentator>=6.1.0
+Requires-Dist: python-multipart>=0.0.6

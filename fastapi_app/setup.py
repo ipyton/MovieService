@@ -1,0 +1,23 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="movie-service",
+    version="0.1.0",
+    packages=find_packages(),
+    include_package_data=True,
+    install_requires=[
+        "fastapi>=0.95.0",
+        "uvicorn>=0.22.0",
+        "pydantic>=1.10.7",
+        "minio>=7.2.15",
+        "ffmpeg-python>=0.2.0",
+        "requests>=2.32.3",
+        "confluent-kafka>=2.8.2",
+        "beautifulsoup4>=4.13.3",
+        "cassandra-driver>=3.29.1",
+        "aria2p>=0.11.3",
+        "prometheus-client>=0.17.1",
+        "prometheus-fastapi-instrumentator>=6.1.0",
+        "python-multipart>=0.0.6"
+    ],
+) 

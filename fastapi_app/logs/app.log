@@ -1,0 +1,13 @@
+2025-06-29 11:53:07.856 INFO  22828 --- [MainThread] __main__                       : ============================================================
+2025-06-29 11:53:07.856 INFO  22828 --- [MainThread] __main__                       : Starting FastAPI application
+2025-06-29 11:53:07.856 INFO  22828 --- [MainThread] __main__                       : Python version: 3.9.6 (default, Apr 30 2025, 02:07:17) 
+[Clang 17.0.0 (clang-1700.0.13.5)]
+2025-06-29 11:53:07.856 INFO  22828 --- [MainThread] __main__                       : Environment: production
+2025-06-29 11:53:07.856 INFO  22828 --- [MainThread] __main__                       : ============================================================
+2025-06-29 11:53:50.483 INFO  22828 --- [MainThread] watchfiles.main                : 3 changes detected
+2025-06-29 11:56:31.996 INFO  23872 --- [MainThread] __main__                       : ============================================================
+2025-06-29 11:56:31.997 INFO  23872 --- [MainThread] __main__                       : Starting FastAPI application
+2025-06-29 11:56:31.997 INFO  23872 --- [MainThread] __main__                       : Python version: 3.9.6 (default, Apr 30 2025, 02:07:17) 
+[Clang 17.0.0 (clang-1700.0.13.5)]
+2025-06-29 11:56:31.997 INFO  23872 --- [MainThread] __main__                       : Environment: production
+2025-06-29 11:56:31.997 INFO  23872 --- [MainThread] __main__                       : ============================================================
